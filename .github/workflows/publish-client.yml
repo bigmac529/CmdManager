@@ -5,7 +5,8 @@ name: Publish Client (ClickOnce)
 # which this workflow never writes to or deletes.
 #
 #   build  (GitHub-hosted windows-latest): ClickOnce needs Visual Studio's MSBuild (`dotnet publish` cannot produce it);
-#          windows-latest has VS 2026 MSBuild, which supports net10.0. Publishes self-contained win-x64 with
+#          windows-latest has VS 2026 MSBuild, which supports net10.0. Publishes framework-dependent win-x64 (needs the
+#          .NET 10 Desktop Runtime x64; setup.exe installs it when the bootstrapper package is on the runner) with
 #          ApplicationVersion 1.0.<run_number>.0, renders index.html, uploads the site as an artifact.
 #          Also runs on pull requests (build only) so ClickOnce breakage shows up before merge.
 #   deploy (self-hosted runner on the web server, environment production, main only): backs up the site root
@@ -67,15 +68,39 @@ jobs:
           Write-Host "MSBuild: $(msbuild -version -nologo | Select-Object -Last 1)"
           Write-Host "dotnet SDK: $(dotnet --version)"
 
+      - name: Locate the .NET 10 Desktop Runtime bootstrapper package
+        id: prereq
+        run: |
+          # setup.exe can only install the runtime if Visual Studio's ClickOnce bootstrapper package is on this machine.
+          $roots = @("${env:ProgramFiles(x86)}\Microsoft SDKs\ClickOnce Bootstrapper\Packages")
+          foreach ($k in @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\GenericBootstrapper\11.0', 'HKLM:\SOFTWARE\Microsoft\GenericBootstrapper\11.0')) {
+            $p = (Get-ItemProperty -Path $k -ErrorAction SilentlyContinue).Path
+            if ($p) { $roots += (Join-Path $p 'Packages') }
+          }
+          $found = $false
+          foreach ($r in ($roots | Select-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath $r)) { Write-Host "(no $r)"; continue }
+            Write-Host "Bootstrapper packages in ${r}:"
+            Get-ChildItem -LiteralPath $r -Directory | Where-Object { $_.Name -match 'NetCore|DotNet|Desktop' } | ForEach-Object { Write-Host "  $($_.Name)" }
+            $pkg = Join-Path $r 'Microsoft.NetCore.DesktopRuntime.10.0.x64'
+            if ((Test-Path -LiteralPath (Join-Path $pkg 'product.xml')) -and (Get-ChildItem -LiteralPath $pkg -Filter package.xml -Recurse)) { $found = $true }
+          }
+          Write-Host "Microsoft.NetCore.DesktopRuntime.10.0.x64 bootstrapper package available: $found"
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "available=$($found.ToString().ToLowerInvariant())`n")
+
       - name: Publish ClickOnce (MSBuild)
         run: |
           msbuild src\CmdManager.Client\CmdManager.Client.csproj /restore /t:Publish `
             /p:PublishProfile=ClickOnceProfile /p:Configuration=Release /p:CmdManagerBuildNumber=$env:BUILD_NUMBER `
+            /p:CmdManagerPrereqDotNet=${{ steps.prereq.outputs.available }} `
             /m /nologo /v:minimal "/bl:$env:RUNNER_TEMP\clickonce-publish.binlog"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Stage site root (validate, render index.html)
         id: stage
+        env:
+          PREREQ: ${{ steps.prereq.outputs.available }}
+          SELF_CONTAINED: 'false'
         run: |
           $version = "1.0.$env:BUILD_NUMBER.0"
           $versionFolder = "CmdManager_" + $version.Replace('.', '_')
@@ -98,10 +123,21 @@ jobs:
             if (Test-Path -LiteralPath (Join-Path $site $bad)) { throw "Publish output unexpectedly contains '$bad' at the root" }
           }
 
-          $bytes = (Get-ChildItem -LiteralPath (Join-Path $site "Application Files\$versionFolder") -Recurse -File | Measure-Object Length -Sum).Sum
-          $sizeMb = [math]::Round($bytes / 1MB)
+          if (-not (Test-Path -LiteralPath (Join-Path $site 'setup.exe'))) { throw "No setup.exe in the publish output" }
+          $appFiles = @(Get-ChildItem -LiteralPath (Join-Path $site "Application Files\$versionFolder") -Recurse -File)
+          $bytes = ($appFiles | Measure-Object Length -Sum).Sum
+          $sizeMb = [math]::Round($bytes / 1MB, 1)
+          # Framework-dependent: the app folder must not carry the .NET runtime (guards against SelfContained creeping back).
+          if ($env:SELF_CONTAINED -ne 'true' -and ($appFiles | Where-Object { $_.Name -like 'coreclr.dll*' -or $_.Name -like 'PresentationCore.dll*' })) {
+            throw "Framework-dependent publish unexpectedly contains .NET runtime files"
+          }
+          if ($env:PREREQ -eq 'true') {
+            $setupNote = 'If the runtime is missing, <a href="setup.exe">setup.exe</a> installs it (from Microsoft) and then installs CmdManager.'
+          } else {
+            $setupNote = 'Install the runtime first, then click <em>Install CmdManager</em>.'
+          }
           $html = [IO.File]::ReadAllText((Resolve-Path 'deploy\clickonce\index.html').Path)
-          $html = $html.Replace('__VERSION__', $version).Replace('__SIZE_MB__', "$sizeMb")
+          $html = $html.Replace('__VERSION__', $version).Replace('__SIZE_MB__', "$sizeMb").Replace('__SETUP_NOTE__', $setupNote)
           $html = $html.Replace('__PUBLISHED__', (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC')
           $html = $html.Replace('__COMMIT__', $env:GITHUB_SHA.Substring(0, 7))
           [IO.File]::WriteAllText((Join-Path $site 'index.html'), $html, (New-Object Text.UTF8Encoding $false))
@@ -109,11 +145,13 @@ jobs:
           $files = Get-ChildItem -LiteralPath $site -Recurse -File
           Write-Host "Staged $($files.Count) files, $([math]::Round(($files | Measure-Object Length -Sum).Sum / 1MB, 1)) MB, version $version"
           Get-ChildItem -LiteralPath $site | ForEach-Object { Write-Host "  $($_.Name)" }
-          Write-Host "Top of Application Files\${versionFolder}:"
-          Get-ChildItem -LiteralPath (Join-Path $site "Application Files\$versionFolder") -File |
-            Where-Object { $_.Name -like 'CmdManager*' -or $_.Name -like 'Launcher*' } | ForEach-Object { Write-Host "  $($_.Name)" }
+          Write-Host "Application Files\${versionFolder}:"
+          $appFiles | ForEach-Object { Write-Host ("  {0,10:N0}  {1}" -f $_.Length, $_.FullName.Substring($site.Length + 1)) }
+          Write-Host "--- prerequisite/dependency entries of CmdManager.dll.manifest"
+          [regex]::Matches([IO.File]::ReadAllText((Join-Path $site "Application Files\$versionFolder\CmdManager.dll.manifest")), '(?s)<dependentAssembly dependencyType="preRequisite".*?</dependentAssembly>') |
+            ForEach-Object { Write-Host $_.Value }
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$version`nversion_folder=$versionFolder`n")
-          [IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "ClickOnce build **$version** ($($files.Count) files, $sizeMb MB app folder)`n")
+          [IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "ClickOnce build **$version** ($($appFiles.Count) app files, $sizeMb MB; runtime prerequisite in setup.exe: $env:PREREQ)`n")
           exit 0  # robocopy's success codes (1-7) must not fail the step
 
       - uses: actions/upload-artifact@v4

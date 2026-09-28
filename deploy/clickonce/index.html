@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Landing page for the CmdManager ClickOnce install. Rendered by .github/workflows/publish-client.yml:
-     __VERSION__ / __PUBLISHED__ / __SIZE_MB__ / __COMMIT__ are replaced at publish time. -->
+     __VERSION__ / __PUBLISHED__ / __SIZE_MB__ / __SETUP_NOTE__ / __COMMIT__ are replaced at publish time. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -18,6 +18,7 @@
     .install:hover { background: #0a55a8; }
     ul { padding-left: 1.2rem; line-height: 1.5; }
     small, .muted { color: #59636e; }
+    .req { border-left: 4px solid #d4a72c; background: #fff8e5; padding: .75rem 1rem; margin: 0 0 1.5rem; border-radius: 4px; }
   </style>
 </head>
 <body>
@@ -25,10 +26,15 @@
   <h1>CmdManager</h1>
   <p class="version">Version <strong id="version">__VERSION__</strong> &middot; published __PUBLISHED__</p>
   <p>Your library of command-line scripts, synced to every Windows PC you use and put on your <code>PATH</code>.</p>
+  <div class="req" id="runtime">
+    <strong>Requires the .NET 10 Desktop Runtime (x64).</strong>
+    Get it from Microsoft: <a href="https://dotnet.microsoft.com/download/dotnet/10.0">dotnet.microsoft.com/download/dotnet/10.0</a>
+    (under &ldquo;.NET Desktop Runtime&rdquo;, Windows x64). __SETUP_NOTE__
+  </div>
   <p><a class="install" href="CmdManager.application">Install CmdManager</a></p>
   <ul>
-    <li>Requires Windows 10 or 11 (x64). The .NET 10 Desktop Runtime is included (self-contained), so nothing else
-        needs to be installed. The first install downloads about __SIZE_MB__ MB; updates only download changed files.</li>
+    <li>Requires Windows 10 or 11 (x64) with the .NET 10 Desktop Runtime (x64). The download is about __SIZE_MB__ MB.
+        Without the runtime, CmdManager shows a Windows message with a link to download it.</li>
     <li>Microsoft Edge opens the installer directly. In other browsers, open the downloaded
         <code>CmdManager.application</code> file, or use <a href="setup.exe">setup.exe</a> instead.</li>
     <li>CmdManager checks <code>https://cmdmanager.socha3.com/</code> for updates each time it starts and installs
