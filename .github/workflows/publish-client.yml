@@ -114,6 +114,7 @@ jobs:
             Where-Object { $_.Name -like 'CmdManager*' -or $_.Name -like 'Launcher*' } | ForEach-Object { Write-Host "  $($_.Name)" }
           [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$version`nversion_folder=$versionFolder`n")
           [IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "ClickOnce build **$version** ($($files.Count) files, $sizeMb MB app folder)`n")
+          exit 0  # robocopy's success codes (1-7) must not fail the step
 
       - uses: actions/upload-artifact@v4
         with:
