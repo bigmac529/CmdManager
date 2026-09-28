@@ -1,0 +1,95 @@
+name: Deploy API
+
+# Builds, tests and publishes the API, then deploys it to the IIS site "CmdManager"
+# (C:\WebApps\CmdManager) on the web server via a self-hosted Windows runner.
+# The job queues until a repo-scoped runner with the labels [self-hosted, windows] is registered.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/CmdManager.Api/**'
+      - 'src/CmdManager.Core/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  SITE_PATH: 'C:\WebApps\CmdManager'
+  HEALTH_URL: 'https://cmdmanager.socha3.com/health'
+  HEALTH_HOST: 'cmdmanager.socha3.com'
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build src/CmdManager.Api/CmdManager.Api.csproj -c Release
+
+      - name: Test
+        run: |
+          dotnet test tests/CmdManager.Core.Tests/CmdManager.Core.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test tests/CmdManager.Api.Tests/CmdManager.Api.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish
+        run: dotnet publish src/CmdManager.Api/CmdManager.Api.csproj -c Release -o "${{ runner.temp }}\cmdmanager-publish" --no-self-contained
+
+      - name: Take site offline (app_offline.htm)
+        run: |
+          if (-not (Test-Path $env:SITE_PATH)) { throw "Site folder $env:SITE_PATH does not exist" }
+          Set-Content -Path (Join-Path $env:SITE_PATH 'app_offline.htm') -Encoding utf8 -Value '<!doctype html><html><body><h1>CmdManager is being updated</h1><p>Please retry in a minute.</p></body></html>'
+          # Give the ASP.NET Core Module time to shut the app down and release file locks.
+          Start-Sleep -Seconds 5
+
+      - name: Copy files (robocopy)
+        run: |
+          # /MIR mirrors the publish output; appsettings.Production.json (server secrets) and app_offline.htm
+          # are excluded from both copy and purge, and logs\ is kept.
+          robocopy "${{ runner.temp }}\cmdmanager-publish" $env:SITE_PATH /MIR /R:5 /W:3 /NP /NFL /NDL `
+            /XF appsettings.Production.json app_offline.htm /XD logs
+          $rc = $LASTEXITCODE
+          Write-Host "robocopy exit code: $rc"
+          if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
+          exit 0
+
+      - name: Bring site online
+        if: always()
+        run: Remove-Item -Path (Join-Path $env:SITE_PATH 'app_offline.htm') -Force -ErrorAction SilentlyContinue
+
+      - name: Health check
+        run: |
+          $ok = $false
+          for ($i = 1; $i -le 20; $i++) {
+            foreach ($target in @(@{ Uri = $env:HEALTH_URL; Headers = @{} },
+                                  @{ Uri = 'http://localhost/health'; Headers = @{ Host = $env:HEALTH_HOST } })) {
+              try {
+                $r = Invoke-WebRequest -Uri $target.Uri -Headers $target.Headers -UseBasicParsing -TimeoutSec 15 -SkipHttpErrorCheck
+                Write-Host "Attempt ${i}: $($target.Uri) -> $($r.StatusCode) $($r.Content)"
+                if ($r.StatusCode -eq 200) { $ok = $true; break }
+              } catch {
+                Write-Host "Attempt ${i}: $($target.Uri) -> $($_.Exception.Message)"
+              }
+            }
+            if ($ok) { break }
+            Start-Sleep -Seconds 6
+          }
+          if (-not $ok) { throw "Health check never returned 200" }
