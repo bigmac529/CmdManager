@@ -1,0 +1,27 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+publish/
+artifacts/
+TestResults/
+*.binlog
+
+# IDE / user files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.rsuser
+
+# Local databases (Sqlite dev profile)
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets / per-machine config: never commit
+appsettings.Production.json
+appsettings.*.local.json
+*.pfx
+*.snk
+.env
