@@ -1,0 +1,307 @@
+name: Publish Client (ClickOnce)
+
+# Builds the WPF client as a ClickOnce app and deploys it to the ROOT of the cmdmanager.socha3.com site
+# (C:\WebApps\CmdManager, static, app pool CmdManagerWeb), next to the /api IIS application (C:\WebApps\CmdManager\api),
+# which this workflow never writes to or deletes.
+#
+#   build  (GitHub-hosted windows-latest): ClickOnce needs Visual Studio's MSBuild (`dotnet publish` cannot produce it);
+#          windows-latest has VS 2026 MSBuild, which supports net10.0. Publishes self-contained win-x64 with
+#          ApplicationVersion 1.0.<run_number>.0, renders index.html, uploads the site as an artifact.
+#          Also runs on pull requests (build only) so ClickOnce breakage shows up before merge.
+#   deploy (self-hosted runner on the web server, environment production, main only): backs up the site root
+#          (without api), copies the new version in, then removes stale ClickOnce files. No /MIR on the root:
+#          only the "Application Files" folder (100% ClickOnce-owned) is mirrored, so api\, the root web.config and
+#          anything else the server owns are never deleted.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/CmdManager.Client/**'
+      - 'src/CmdManager.Core/**'
+      - 'deploy/clickonce/**'
+      - '.github/workflows/publish-client.yml'
+  pull_request:
+    paths:
+      - 'src/CmdManager.Client/**'
+      - 'src/CmdManager.Core/**'
+      - 'deploy/clickonce/**'
+      - '.github/workflows/publish-client.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-client-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    outputs:
+      version: ${{ steps.stage.outputs.version }}
+      version_folder: ${{ steps.stage.outputs.version_folder }}
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+      PUBLISH_DIR: src\CmdManager.Client\bin\publish\clickonce
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Toolchain
+        run: |
+          Write-Host "MSBuild: $(msbuild -version -nologo | Select-Object -Last 1)"
+          Write-Host "dotnet SDK: $(dotnet --version)"
+
+      - name: Publish ClickOnce (MSBuild)
+        run: |
+          msbuild src\CmdManager.Client\CmdManager.Client.csproj /restore /t:Publish `
+            /p:PublishProfile=ClickOnceProfile /p:Configuration=Release /p:CmdManagerBuildNumber=$env:BUILD_NUMBER `
+            /m /nologo /v:minimal "/bl:$env:RUNNER_TEMP\clickonce-publish.binlog"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage site root (validate, render index.html)
+        id: stage
+        run: |
+          $version = "1.0.$env:BUILD_NUMBER.0"
+          $versionFolder = "CmdManager_" + $version.Replace('.', '_')
+          $pub = (Resolve-Path $env:PUBLISH_DIR).Path
+          $app = Join-Path $pub 'CmdManager.application'
+          $verDir = Join-Path $pub "Application Files\$versionFolder"
+          if (-not (Test-Path -LiteralPath $app)) { throw "No CmdManager.application in $pub" }
+          if (-not (Test-Path -LiteralPath (Join-Path $verDir 'CmdManager.dll.manifest'))) { throw "No application manifest in $verDir" }
+          $appXml = [IO.File]::ReadAllText($app)
+          if ($appXml -notmatch ('version="' + [regex]::Escape($version) + '"')) { throw "CmdManager.application does not carry version $version" }
+          if ($appXml -notmatch 'codebase="https://cmdmanager\.socha3\.com/CmdManager\.application"') { throw "Deployment provider is not https://cmdmanager.socha3.com/CmdManager.application" }
+          Write-Host "--- <deployment> element of CmdManager.application"
+          ([regex]::Match($appXml, '(?s)<deployment .*?</deployment>')).Value | Write-Host
+
+          $site = Join-Path $env:RUNNER_TEMP 'clickonce-site'
+          if (Test-Path $site) { Remove-Item -LiteralPath $site -Recurse -Force }
+          robocopy $pub $site /E /R:2 /W:2 /NP /NFL /NDL /NJH /NJS /XF publish.htm
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
+          foreach ($bad in @('api', 'web.config')) {
+            if (Test-Path -LiteralPath (Join-Path $site $bad)) { throw "Publish output unexpectedly contains '$bad' at the root" }
+          }
+
+          $bytes = (Get-ChildItem -LiteralPath (Join-Path $site "Application Files\$versionFolder") -Recurse -File | Measure-Object Length -Sum).Sum
+          $sizeMb = [math]::Round($bytes / 1MB)
+          $html = [IO.File]::ReadAllText((Resolve-Path 'deploy\clickonce\index.html').Path)
+          $html = $html.Replace('__VERSION__', $version).Replace('__SIZE_MB__', "$sizeMb")
+          $html = $html.Replace('__PUBLISHED__', (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm') + ' UTC')
+          $html = $html.Replace('__COMMIT__', $env:GITHUB_SHA.Substring(0, 7))
+          [IO.File]::WriteAllText((Join-Path $site 'index.html'), $html, (New-Object Text.UTF8Encoding $false))
+
+          $files = Get-ChildItem -LiteralPath $site -Recurse -File
+          Write-Host "Staged $($files.Count) files, $([math]::Round(($files | Measure-Object Length -Sum).Sum / 1MB, 1)) MB, version $version"
+          Get-ChildItem -LiteralPath $site | ForEach-Object { Write-Host "  $($_.Name)" }
+          Write-Host "Top of Application Files\${versionFolder}:"
+          Get-ChildItem -LiteralPath (Join-Path $site "Application Files\$versionFolder") -File |
+            Where-Object { $_.Name -like 'CmdManager*' -or $_.Name -like 'Launcher*' } | ForEach-Object { Write-Host "  $($_.Name)" }
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$version`nversion_folder=$versionFolder`n")
+          [IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "ClickOnce build **$version** ($($files.Count) files, $sizeMb MB app folder)`n")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clickonce-site
+          path: ${{ runner.temp }}\clickonce-site
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: clickonce-binlog
+          path: ${{ runner.temp }}\clickonce-publish.binlog
+          if-no-files-found: ignore
+          retention-days: 7
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, windows, cmdmanager]
+    environment: production
+    timeout-minutes: 30
+    defaults:
+      run:
+        # Windows PowerShell 5.1 is always present on Windows Server; everything below also runs under pwsh 7.
+        shell: powershell
+    env:
+      # Repo variables (see deploy-api.yml): the site root is the PARENT of DEPLOY_PATH (C:\WebApps\CmdManager\api).
+      API_PATH: ${{ vars.DEPLOY_PATH }}
+      BACKUP_ROOT: ${{ vars.DEPLOY_BACKUP_ROOT }}
+      BACKUP_KEEP: '5'
+      VERSION: ${{ needs.build.outputs.version }}
+      VERSION_FOLDER: ${{ needs.build.outputs.version_folder }}
+      PUBLIC_URL: 'https://cmdmanager.socha3.com/'
+      LOCAL_URL: 'http://localhost/'
+      SITE_HOST: 'cmdmanager.socha3.com'
+    steps:
+      - name: Resolve and guard the site root
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:API_PATH)) { throw "Repo variable DEPLOY_PATH is not set (expected C:\WebApps\CmdManager\api)." }
+          $api = $env:API_PATH.Trim().TrimEnd('\')
+          if (-not $api.EndsWith('\api', [StringComparison]::OrdinalIgnoreCase)) { throw "DEPLOY_PATH '$api' must end in '\api'." }
+          $root = Split-Path -Parent $api
+          if ($root -match '^[A-Za-z]:\\?$' -or $root.Length -lt 6) { throw "Refusing to deploy to '$root' (drive root / too short)." }
+          if (-not (Test-Path -LiteralPath $api -PathType Container)) { throw "API folder $api not found: refusing to touch $root." }
+          if ([string]::IsNullOrWhiteSpace($env:VERSION) -or [string]::IsNullOrWhiteSpace($env:VERSION_FOLDER)) { throw "Build did not report a version." }
+          Write-Host "Site root: $root  (api application at $api is excluded)"
+          Write-Host "Runner account: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "SITE_ROOT=$root`nAPI_DIR=$api`nSTAGE=$env:RUNNER_TEMP\clickonce-site`n")
+
+      - name: Inspect site root (names only) and check write access
+        run: |
+          Get-ChildItem -LiteralPath $env:SITE_ROOT -Force |
+            Format-Table Mode, LastWriteTime, Length, Name -AutoSize | Out-String -Width 200 | Write-Host
+          $wc = Join-Path $env:SITE_ROOT 'web.config'
+          if (Test-Path -LiteralPath $wc) {
+            Write-Host "Root web.config exists (server-owned; never overwritten or deleted by this workflow)."
+            try {
+              $x = [xml](Get-Content -LiteralPath $wc -Raw)
+              $mimes = $x.SelectNodes('//staticContent/*') | ForEach-Object { "$($_.LocalName) $($_.fileExtension) $($_.mimeType)" }
+              if ($mimes) { Write-Host "  staticContent: $($mimes -join '; ')" }
+            } catch { Write-Host "  (could not parse: $($_.Exception.Message))" }
+          } else { Write-Host "No root web.config." }
+          foreach ($d in @('Default.htm', 'Default.asp', 'index.htm')) {
+            if (Test-Path -LiteralPath (Join-Path $env:SITE_ROOT $d)) { Write-Warning "$d exists at the root and may shadow index.html (IIS default document order)." }
+          }
+          $probe = Join-Path $env:SITE_ROOT (".write-test-" + [guid]::NewGuid().ToString('N') + '.tmp')
+          try { [IO.File]::WriteAllText($probe, 'x'); Remove-Item -LiteralPath $probe -Force }
+          catch { throw "The runner account cannot write to $env:SITE_ROOT ($($_.Exception.Message)). It needs Modify on the site root (files + 'Application Files'), in addition to api and the backup root." }
+          Write-Host "Write access to $env:SITE_ROOT OK"
+
+      - name: Clean staging folder
+        run: if (Test-Path -LiteralPath $env:STAGE) { Remove-Item -LiteralPath $env:STAGE -Recurse -Force }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: clickonce-site
+          path: ${{ runner.temp }}\clickonce-site
+
+      - name: Validate artifact
+        run: |
+          foreach ($p in @('CmdManager.application', 'index.html', "Application Files\$env:VERSION_FOLDER\CmdManager.dll.manifest")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $env:STAGE $p))) { throw "Artifact is missing $p" }
+          }
+          foreach ($bad in @('api', 'web.config')) {
+            if (Test-Path -LiteralPath (Join-Path $env:STAGE $bad)) { throw "Artifact must not contain '$bad' at the root" }
+          }
+          $dirs = @(Get-ChildItem -LiteralPath $env:STAGE -Directory | ForEach-Object Name)
+          if ($dirs.Count -ne 1 -or $dirs[0] -ne 'Application Files') { throw "Unexpected top-level folders in artifact: $($dirs -join ', ')" }
+          Write-Host "Artifact OK: version $env:VERSION"
+
+      - name: Back up current site root (without api)
+        if: env.BACKUP_ROOT != ''
+        run: |
+          $root = Join-Path $env:BACKUP_ROOT.Trim().TrimEnd('\') 'site-root'
+          $dest = Join-Path $root (Get-Date -Format 'yyyyMMdd-HHmmss')
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          robocopy $env:SITE_ROOT $dest /E /R:2 /W:2 /NP /NFL /NDL /NJH /XD $env:API_DIR
+          $rc = $LASTEXITCODE
+          if ($rc -ge 8) { throw "Backup robocopy failed with exit code $rc" }
+          if (Test-Path -LiteralPath (Join-Path $dest 'api')) { throw "Backup unexpectedly contains api\" }
+          Write-Host "Backed up $env:SITE_ROOT (without api) to $dest (robocopy exit code $rc)"
+          # Keep only the newest N backups (folder names are sortable timestamps).
+          $keep = [int]$env:BACKUP_KEEP
+          $old = Get-ChildItem -Path $root -Directory | Where-Object { $_.Name -match '^\d{8}-\d{6}$' } |
+                 Sort-Object Name -Descending | Select-Object -Skip $keep
+          foreach ($d in $old) { Write-Host "Removing old backup $($d.FullName)"; Remove-Item -LiteralPath $d.FullName -Recurse -Force }
+          exit 0
+
+      - name: Deploy (copy new version, flip CmdManager.application, remove stale files)
+        run: |
+          $src = $env:STAGE; $root = $env:SITE_ROOT; $af = 'Application Files'
+          function Invoke-Robocopy([string[]]$argv, [string]$what) {
+            robocopy @argv /R:5 /W:3 /NP /NFL /NDL /NJH
+            $rc = $LASTEXITCODE
+            Write-Host "${what}: robocopy exit code $rc"
+            if ($rc -ge 8) { throw "$what failed (robocopy exit code $rc)" }
+          }
+          # 1. Add the new version folder next to the old one (no purge yet, so clients mid-update keep working).
+          Invoke-Robocopy @("$src\$af", "$root\$af", '/E') 'Copy Application Files'
+          # 2. Top-level files only (no /S, no purge): index.html, setup.exe ... then the deployment manifest last,
+          #    which is what switches installs/updates to the new version. api\ and web.config are never involved.
+          Invoke-Robocopy @($src, $root, '/XF', 'CmdManager.application', 'web.config') 'Copy top-level files'
+          Invoke-Robocopy @($src, $root, 'CmdManager.application', '/IS', '/IT') 'Copy CmdManager.application'
+          # 3. Purge old versions inside "Application Files" only (a folder that holds nothing but ClickOnce output).
+          Invoke-Robocopy @("$src\$af", "$root\$af", '/MIR') 'Mirror Application Files'
+          # 4. Top-level files deployed last time but no longer published (tracked list; server-owned files are never
+          #    on it, and web.config is never deleted).
+          $new = @(Get-ChildItem -LiteralPath $src -File | ForEach-Object Name)
+          if ($env:BACKUP_ROOT) {
+            $stateDir = Join-Path $env:BACKUP_ROOT.Trim().TrimEnd('\') 'site-root'
+            New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+            $state = Join-Path $stateDir 'deployed-root-files.txt'
+            if (Test-Path -LiteralPath $state) {
+              foreach ($n in (Get-Content -LiteralPath $state)) {
+                $n = $n.Trim()
+                if (-not $n -or $n -match '[\\/]' -or $n -ieq 'web.config' -or $new -contains $n) { continue }
+                $f = Join-Path $root $n
+                if (Test-Path -LiteralPath $f -PathType Leaf) { Write-Host "Removing stale $n"; Remove-Item -LiteralPath $f -Force }
+              }
+            }
+            Set-Content -LiteralPath $state -Value $new -Encoding ascii
+          }
+          Write-Host "Deployed version $env:VERSION to $root"
+          exit 0
+
+      - name: Verify (landing page, manifests, files, API health)
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          function Get-Url([string]$uri, [string]$hostHeader) {
+            $req = [System.Net.HttpWebRequest]::Create($uri)
+            $req.Timeout = 30000
+            $req.Headers.Add('Cache-Control', 'no-cache')
+            if ($hostHeader) { $req.Host = $hostHeader }
+            try { $resp = $req.GetResponse() }
+            catch [System.Net.WebException] { $resp = $_.Exception.Response; if (-not $resp) { throw } }
+            try {
+              $body = (New-Object System.IO.StreamReader($resp.GetResponseStream())).ReadToEnd()
+              return @([int]$resp.StatusCode, [string]$resp.ContentType, $body)
+            } finally { $resp.Close() }
+          }
+          $v = $env:VERSION; $vf = "Application%20Files/$env:VERSION_FOLDER"
+          # path, expected content type prefix ('' = any), required body text ('' = none)
+          $checks = @(
+            @('', 'text/html', $v),
+            @('CmdManager.application', 'application/x-ms-application', "version=`"$v`""),
+            @("$vf/CmdManager.dll.manifest", 'application/x-ms-manifest', ''),
+            @("$vf/CmdManager.dll.deploy", '', ''),
+            @("$vf/CmdManager.exe.deploy", '', ''),
+            @('setup.exe', '', ''),
+            @('api/health', 'application/json', 'Healthy')
+          )
+          $failed = @()
+          foreach ($c in $checks) {
+            $ok = $false; $last = ''
+            for ($i = 1; $i -le 10 -and -not $ok; $i++) {
+              try {
+                $code, $ct, $body = Get-Url ($env:PUBLIC_URL + $c[0]) ''
+                $last = "$code $ct"
+                $ok = ($code -eq 200) -and ($c[1] -eq '' -or $ct.StartsWith($c[1])) -and ($c[2] -eq '' -or $body.Contains($c[2]))
+              } catch { $last = $_.Exception.Message }
+              if (-not $ok) { Start-Sleep -Seconds 6 }
+            }
+            try { $lc, $lct, $null = Get-Url ($env:LOCAL_URL + $c[0]) $env:SITE_HOST; $local = "$lc $lct" } catch { $local = $_.Exception.Message }
+            $line = "{0} /{1} -> public: {2} | local: {3}" -f ($(if ($ok) { 'OK  ' } else { 'FAIL' })), $c[0], $last, $local
+            Write-Host $line
+            [IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "- ``$line```n")
+            if (-not $ok) { $failed += $c[0] }
+          }
+          if ($failed.Count) { throw "Verification failed for: $($failed -join ', ')" }
+          Write-Host "CmdManager $v is live at $env:PUBLIC_URL"
