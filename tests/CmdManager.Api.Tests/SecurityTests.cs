@@ -11,26 +11,26 @@ public class SecurityTests(ApiFactory factory) : IClassFixture<ApiFactory>
 {
     public static TheoryData<string, string> LibraryEndpoints => new()
     {
-        { "GET", "/api/auth/me" },
-        { "POST", "/api/auth/logout" },
-        { "GET", "/api/commands" },
-        { "GET", "/api/commands/1" },
-        { "GET", "/api/commands/1/content" },
-        { "POST", "/api/commands" },
-        { "PUT", "/api/commands/1" },
-        { "PUT", "/api/commands/1/content" },
-        { "DELETE", "/api/commands/1" },
-        { "GET", "/api/assets" },
-        { "GET", "/api/assets/1" },
-        { "GET", "/api/assets/1/content" },
-        { "POST", "/api/assets" },
-        { "PUT", "/api/assets/1" },
-        { "PUT", "/api/assets/1/content" },
-        { "DELETE", "/api/assets/1" },
-        { "GET", "/api/library/manifest" },
-        { "POST", "/api/library/import" },
-        { "GET", "/api/library/export" },
-        { "GET", "/api/some/unmapped/route" }
+        { "GET", "auth/me" },
+        { "POST", "auth/logout" },
+        { "GET", "commands" },
+        { "GET", "commands/1" },
+        { "GET", "commands/1/content" },
+        { "POST", "commands" },
+        { "PUT", "commands/1" },
+        { "PUT", "commands/1/content" },
+        { "DELETE", "commands/1" },
+        { "GET", "assets" },
+        { "GET", "assets/1" },
+        { "GET", "assets/1/content" },
+        { "POST", "assets" },
+        { "PUT", "assets/1" },
+        { "PUT", "assets/1/content" },
+        { "DELETE", "assets/1" },
+        { "GET", "library/manifest" },
+        { "POST", "library/import" },
+        { "GET", "library/export" },
+        { "GET", "some/unmapped/route" }
     };
 
     [Theory]
@@ -46,8 +46,8 @@ public class SecurityTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Theory]
-    [InlineData("/health")]
-    [InlineData("/api/auth/config")]
+    [InlineData("health")]
+    [InlineData("auth/config")]
     public async Task Anonymous_endpoints_are_reachable(string url)
     {
         var resp = await factory.CreateClient().GetAsync(url);
@@ -61,7 +61,7 @@ public class SecurityTests(ApiFactory factory) : IClassFixture<ApiFactory>
         const string forged = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiaXNzIjoiQ21kTWFuYWdlciIsImF1ZCI6IkNtZE1hbmFnZXIuQ2xpZW50IiwiZXhwIjo0MTAyNDQ0ODAwfQ.c2lnbmF0dXJlLW5vdC12YWxpZA";
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new("Bearer", forged);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync("/api/commands")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync("commands")).StatusCode);
     }
 
     [Fact]
@@ -111,7 +111,7 @@ public class SecurityTests(ApiFactory factory) : IClassFixture<ApiFactory>
 
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new("Bearer", alice.Session!.AccessToken);
-        var list = await http.GetFromJsonAsync<List<CommandSummaryDto>>($"/api/commands?userId={bob.Session!.User.Id}", CmdManagerJson.Options);
+        var list = await http.GetFromJsonAsync<List<CommandSummaryDto>>($"commands?userId={bob.Session!.User.Id}", CmdManagerJson.Options);
         Assert.Empty(list!);
     }
 

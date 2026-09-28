@@ -1,7 +1,9 @@
 name: Deploy API
 
-# Builds, tests and publishes the API, then deploys it to the IIS site "CmdManager"
-# (C:\WebApps\CmdManager) on the web server via a self-hosted Windows runner.
+# Builds, tests and publishes the API, then deploys it to the IIS application /api of the cmdmanager.socha3.com site
+# (C:\WebApps\CmdManager\api, app pool CmdManager) on the web server via a self-hosted Windows runner.
+# The site root C:\WebApps\CmdManager holds the static ClickOnce files (app pool CmdManagerWeb): this workflow
+# only ever writes inside the api folder.
 # The job queues until a repo-scoped runner with the labels [self-hosted, windows] is registered.
 
 on:
@@ -22,18 +24,37 @@ permissions:
 env:
   DOTNET_NOLOGO: '1'
   DOTNET_CLI_TELEMETRY_OPTOUT: '1'
-  SITE_PATH: 'C:\WebApps\CmdManager'
-  HEALTH_URL: 'https://cmdmanager.socha3.com/health'
+  # Repo variables (Settings → Secrets and variables → Actions → Variables):
+  #   DEPLOY_PATH        = C:\WebApps\CmdManager\api                (required; must end in \api)
+  #   DEPLOY_BACKUP_ROOT = C:\WebApps\_deploy-backups\CmdManager   (optional; pre-deploy backups, newest 5 kept)
+  SITE_PATH: ${{ vars.DEPLOY_PATH }}
+  BACKUP_ROOT: ${{ vars.DEPLOY_BACKUP_ROOT }}
+  BACKUP_KEEP: '5'
+  HEALTH_URL: 'https://cmdmanager.socha3.com/api/health'
+  HEALTH_LOCAL_URL: 'http://localhost/api/health'
   HEALTH_HOST: 'cmdmanager.socha3.com'
 
 jobs:
   deploy:
-    runs-on: [self-hosted, windows]
+    runs-on: [self-hosted, windows, cmdmanager]
+    environment: production
     timeout-minutes: 30
     defaults:
       run:
-        shell: pwsh
+        # Windows PowerShell 5.1 is always present on Windows Server; everything below also runs under pwsh 7.
+        shell: powershell
     steps:
+      - name: Guard deploy target (must be the api folder)
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SITE_PATH)) {
+            throw "Repo variable DEPLOY_PATH is not set (expected C:\WebApps\CmdManager\api)."
+          }
+          $target = $env:SITE_PATH.Trim().TrimEnd('\')
+          if (-not $target.EndsWith('\api', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "DEPLOY_PATH '$env:SITE_PATH' must end in '\api': robocopy /MIR would otherwise purge the site root (ClickOnce files)."
+          }
+          Write-Host "Deploy target: $target"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
@@ -53,43 +74,79 @@ jobs:
       - name: Publish
         run: dotnet publish src/CmdManager.Api/CmdManager.Api.csproj -c Release -o "${{ runner.temp }}\cmdmanager-publish" --no-self-contained
 
-      - name: Take site offline (app_offline.htm)
+      - name: Back up current API folder
+        if: env.BACKUP_ROOT != ''
         run: |
-          if (-not (Test-Path $env:SITE_PATH)) { throw "Site folder $env:SITE_PATH does not exist" }
+          $source = $env:SITE_PATH.Trim().TrimEnd('\')
+          if (-not (Test-Path $source)) { Write-Host "Nothing to back up: $source does not exist"; exit 0 }
+          $root = $env:BACKUP_ROOT.Trim().TrimEnd('\')
+          $dest = Join-Path $root (Get-Date -Format 'yyyyMMdd-HHmmss')
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          # Full copy (appsettings.Production.json included, so a backup can be restored as-is). /NFL /NDL keeps
+          # file names (and nothing of their contents) out of the log.
+          robocopy $source $dest /E /R:2 /W:2 /NP /NFL /NDL /NJH /XF app_offline.htm /XD logs
+          $rc = $LASTEXITCODE
+          if ($rc -ge 8) { throw "Backup robocopy failed with exit code $rc" }
+          Write-Host "Backed up $source to $dest (robocopy exit code $rc)"
+          # Keep only the newest N backups (folder names are sortable timestamps).
+          $keep = [int]$env:BACKUP_KEEP
+          $old = Get-ChildItem -Path $root -Directory | Where-Object { $_.Name -match '^\d{8}-\d{6}$' } |
+                 Sort-Object Name -Descending | Select-Object -Skip $keep
+          foreach ($d in $old) { Write-Host "Removing old backup $($d.FullName)"; Remove-Item -LiteralPath $d.FullName -Recurse -Force }
+          exit 0
+
+      - name: Take API offline (app_offline.htm in the api folder)
+        id: offline
+        run: |
+          if (-not (Test-Path $env:SITE_PATH)) { throw "API folder $env:SITE_PATH does not exist (IIS application /api)" }
           Set-Content -Path (Join-Path $env:SITE_PATH 'app_offline.htm') -Encoding utf8 -Value '<!doctype html><html><body><h1>CmdManager is being updated</h1><p>Please retry in a minute.</p></body></html>'
           # Give the ASP.NET Core Module time to shut the app down and release file locks.
           Start-Sleep -Seconds 5
 
       - name: Copy files (robocopy)
         run: |
-          # /MIR mirrors the publish output; appsettings.Production.json (server secrets) and app_offline.htm
-          # are excluded from both copy and purge, and logs\ is kept.
-          robocopy "${{ runner.temp }}\cmdmanager-publish" $env:SITE_PATH /MIR /R:5 /W:3 /NP /NFL /NDL `
+          # /MIR mirrors the publish output into the api folder ONLY (guarded above).
+          # /XF appsettings.Production.json: robocopy exclusions apply to the purge as well as the copy, so the
+          # server's secrets file is never overwritten AND never deleted by /MIR even though it is not in the
+          # publish output. Same for app_offline.htm; /XD logs keeps the stdout log folder.
+          $target = $env:SITE_PATH.Trim().TrimEnd('\')
+          if (-not $target.EndsWith('\api', [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing to /MIR onto $target" }
+          robocopy "${{ runner.temp }}\cmdmanager-publish" $target /MIR /R:5 /W:3 /NP /NFL /NDL `
             /XF appsettings.Production.json app_offline.htm /XD logs
           $rc = $LASTEXITCODE
           Write-Host "robocopy exit code: $rc"
           if ($rc -ge 8) { throw "robocopy failed with exit code $rc" }
           exit 0
 
-      - name: Bring site online
-        if: always()
+      - name: Bring API online
+        if: always() && steps.offline.outcome == 'success'
         run: Remove-Item -Path (Join-Path $env:SITE_PATH 'app_offline.htm') -Force -ErrorAction SilentlyContinue
 
       - name: Health check
         run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          function Get-Health([string]$uri, [string]$hostHeader) {
+            $req = [System.Net.HttpWebRequest]::Create($uri)
+            $req.Timeout = 15000
+            if ($hostHeader) { $req.Host = $hostHeader }
+            try { $resp = $req.GetResponse() }
+            catch [System.Net.WebException] { $resp = $_.Exception.Response; if (-not $resp) { throw } }
+            try {
+              $body = (New-Object System.IO.StreamReader($resp.GetResponseStream())).ReadToEnd()
+              return @([int]$resp.StatusCode, $body)
+            } finally { $resp.Close() }
+          }
           $ok = $false
-          for ($i = 1; $i -le 20; $i++) {
-            foreach ($target in @(@{ Uri = $env:HEALTH_URL; Headers = @{} },
-                                  @{ Uri = 'http://localhost/health'; Headers = @{ Host = $env:HEALTH_HOST } })) {
+          for ($i = 1; $i -le 20 -and -not $ok; $i++) {
+            foreach ($t in @(@($env:HEALTH_URL, ''), @($env:HEALTH_LOCAL_URL, $env:HEALTH_HOST))) {
               try {
-                $r = Invoke-WebRequest -Uri $target.Uri -Headers $target.Headers -UseBasicParsing -TimeoutSec 15 -SkipHttpErrorCheck
-                Write-Host "Attempt ${i}: $($target.Uri) -> $($r.StatusCode) $($r.Content)"
-                if ($r.StatusCode -eq 200) { $ok = $true; break }
+                $code, $body = Get-Health $t[0] $t[1]
+                Write-Host "Attempt ${i}: $($t[0]) -> $code $body"
+                if ($code -eq 200) { $ok = $true; break }
               } catch {
-                Write-Host "Attempt ${i}: $($target.Uri) -> $($_.Exception.Message)"
+                Write-Host "Attempt ${i}: $($t[0]) -> $($_.Exception.Message)"
               }
             }
-            if ($ok) { break }
-            Start-Sleep -Seconds 6
+            if (-not $ok) { Start-Sleep -Seconds 6 }
           }
-          if (-not $ok) { throw "Health check never returned 200" }
+          if (-not $ok) { throw "Health check never returned 200 ($env:HEALTH_URL)" }

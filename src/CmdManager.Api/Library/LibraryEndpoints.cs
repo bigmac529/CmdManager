@@ -11,7 +11,7 @@ public static class LibraryEndpoints
 {
     public static RouteGroupBuilder MapLibraryEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/library").WithTags("Library").RequireAuthorization();
+        var g = app.MapGroup("/library").WithTags("Library").RequireAuthorization();
         g.MapGet("/manifest", Manifest);
         g.MapPost("/import", Import);
         g.MapGet("/export", Export);

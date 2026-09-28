@@ -25,21 +25,46 @@ public sealed class CmdManagerApiClient : IDisposable
             throw new ArgumentException("HttpClient.BaseAddress must be set to the server URL.", nameof(http));
     }
 
-    /// <summary>Creates the single HttpClient (with <see cref="AuthTokenHandler"/>) for <paramref name="serverUrl"/>, e.g. https://cmdmanager.socha3.com.</summary>
+    /// <summary>
+    /// Creates the single HttpClient (with <see cref="AuthTokenHandler"/>) for the API base URL <paramref name="serverUrl"/>,
+    /// e.g. <see cref="DefaultServerUrl"/>. All request URIs are relative without a leading slash ("auth/login"), so the
+    /// "/api/" part of BaseAddress is kept.
+    /// </summary>
     public static CmdManagerApiClient Create(string serverUrl, AuthSession session, TimeSpan? timeout = null)
     {
-        var handler = new AuthTokenHandler(session) { InnerHandler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) } };
-        var http = new HttpClient(handler) { BaseAddress = NormalizeServerUrl(serverUrl), Timeout = timeout ?? TimeSpan.FromMinutes(10) };
+        var baseAddress = NormalizeServerUrl(serverUrl);
+        var handler = new AuthTokenHandler(session, baseAddress) { InnerHandler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) } };
+        var http = new HttpClient(handler) { BaseAddress = baseAddress, Timeout = timeout ?? TimeSpan.FromMinutes(10) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("CmdManager.Client/1.0");
         return new CmdManagerApiClient(http, session, disposeHttp: true);
     }
 
+    /// <summary>Production API base URL (IIS application /api on the cmdmanager.socha3.com site).</summary>
+    public const string DefaultServerUrl = "https://cmdmanager.socha3.com/api/";
+
+    /// <summary>Absolute http(s) URL, query/fragment dropped, always ending in "/" (so relative URIs append to it).</summary>
     public static Uri NormalizeServerUrl(string serverUrl)
     {
         if (!Uri.TryCreate(serverUrl?.Trim(), UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
-            throw new ArgumentException("Server URL must be an absolute http(s) URL, e.g. https://cmdmanager.socha3.com", nameof(serverUrl));
+            throw new ArgumentException("Server URL must be an absolute http(s) URL, e.g. " + DefaultServerUrl, nameof(serverUrl));
         var s = uri.GetLeftPart(UriPartial.Path);
         return new Uri(s.EndsWith('/') ? s : s + "/");
+    }
+
+    /// <summary>
+    /// Maps settings saved by older builds to the current layout: empty → <see cref="DefaultServerUrl"/>, and the old
+    /// site-root URL https://cmdmanager.socha3.com[/] → https://cmdmanager.socha3.com/api/ (the API moved to the /api
+    /// IIS application). Anything else is returned unchanged.
+    /// </summary>
+    public static string UpgradeServerUrl(string? serverUrl)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl))
+            return DefaultServerUrl;
+        if (Uri.TryCreate(serverUrl.Trim(), UriKind.Absolute, out var uri)
+            && string.Equals(uri.Host, new Uri(DefaultServerUrl).Host, StringComparison.OrdinalIgnoreCase)
+            && uri.AbsolutePath is "/" or "")
+            return DefaultServerUrl;
+        return serverUrl;
     }
 
     public Uri ServerUrl => _http.BaseAddress!;
@@ -53,24 +78,24 @@ public sealed class CmdManagerApiClient : IDisposable
     // ---------------- auth ----------------
 
     public Task<AuthConfigDto> GetAuthConfigAsync(CancellationToken ct = default) =>
-        SendAsync<AuthConfigDto>(() => new HttpRequestMessage(HttpMethod.Get, "api/auth/config"), ct);
+        SendAsync<AuthConfigDto>(() => new HttpRequestMessage(HttpMethod.Get, "auth/config"), ct);
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken ct = default)
     {
-        var auth = await SendAsync<AuthResponse>(() => Json(HttpMethod.Post, "api/auth/register", request), ct);
+        var auth = await SendAsync<AuthResponse>(() => Json(HttpMethod.Post, "auth/register", request), ct);
         AuthSession.Set(auth);
         return auth;
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
-        var auth = await SendAsync<AuthResponse>(() => Json(HttpMethod.Post, "api/auth/login", request), ct);
+        var auth = await SendAsync<AuthResponse>(() => Json(HttpMethod.Post, "auth/login", request), ct);
         AuthSession.Set(auth);
         return auth;
     }
 
     public Task<UserDto> MeAsync(CancellationToken ct = default) =>
-        SendAsync<UserDto>(() => new HttpRequestMessage(HttpMethod.Get, "api/auth/me"), ct);
+        SendAsync<UserDto>(() => new HttpRequestMessage(HttpMethod.Get, "auth/me"), ct);
 
     /// <summary>Forces a token refresh (normally automatic). False when the session is gone.</summary>
     public async Task<bool> TryRefreshAsync(CancellationToken ct = default)
@@ -78,7 +103,7 @@ public sealed class CmdManagerApiClient : IDisposable
         var current = AuthSession.Current;
         if (current is null)
             return false;
-        using var req = Json(HttpMethod.Post, "api/auth/refresh", new RefreshRequest(current.RefreshToken));
+        using var req = Json(HttpMethod.Post, "auth/refresh", new RefreshRequest(current.RefreshToken));
         using var resp = await _http.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode)
             return false;
@@ -94,7 +119,7 @@ public sealed class CmdManagerApiClient : IDisposable
         {
             try
             {
-                using var req = Json(HttpMethod.Post, "api/auth/logout", new RefreshRequest(current.RefreshToken));
+                using var req = Json(HttpMethod.Post, "auth/logout", new RefreshRequest(current.RefreshToken));
                 using var resp = await _http.SendAsync(req, ct);
             }
             catch (HttpRequestException)
@@ -109,35 +134,35 @@ public sealed class CmdManagerApiClient : IDisposable
     // ---------------- commands ----------------
 
     public Task<List<CommandSummaryDto>> ListCommandsAsync(string? search = null, CancellationToken ct = default) =>
-        SendAsync<List<CommandSummaryDto>>(() => new HttpRequestMessage(HttpMethod.Get, "api/commands" + Query(("search", search))), ct);
+        SendAsync<List<CommandSummaryDto>>(() => new HttpRequestMessage(HttpMethod.Get, "commands" + Query(("search", search))), ct);
 
     public Task<CommandDto> GetCommandAsync(int id, CancellationToken ct = default) =>
-        SendAsync<CommandDto>(() => new HttpRequestMessage(HttpMethod.Get, $"api/commands/{id}"), ct);
+        SendAsync<CommandDto>(() => new HttpRequestMessage(HttpMethod.Get, $"commands/{id}"), ct);
 
     public Task<CommandDto> CreateCommandAsync(CommandUpsertRequest request, CancellationToken ct = default) =>
-        SendAsync<CommandDto>(() => Json(HttpMethod.Post, "api/commands", request), ct);
+        SendAsync<CommandDto>(() => Json(HttpMethod.Post, "commands", request), ct);
 
     public Task<CommandDto> UpdateCommandAsync(int id, CommandUpsertRequest request, CancellationToken ct = default) =>
-        SendAsync<CommandDto>(() => Json(HttpMethod.Put, $"api/commands/{id}", request), ct);
+        SendAsync<CommandDto>(() => Json(HttpMethod.Put, $"commands/{id}", request), ct);
 
     /// <param name="expectedSha256">When set, the server refuses (409) if the command's content changed meanwhile.</param>
     public Task DeleteCommandAsync(int id, string? expectedSha256 = null, CancellationToken ct = default) =>
-        SendAsync(() => new HttpRequestMessage(HttpMethod.Delete, $"api/commands/{id}" + Query(("expectedSha256", expectedSha256))), ct);
+        SendAsync(() => new HttpRequestMessage(HttpMethod.Delete, $"commands/{id}" + Query(("expectedSha256", expectedSha256))), ct);
 
     /// <summary>Replaces only the content (keeps name/description/tags). 409 when <paramref name="expectedSha256"/> no longer matches.</summary>
     public Task<CommandDto> ReplaceCommandContentAsync(int id, byte[] content, string? expectedSha256 = null, CancellationToken ct = default) =>
-        SendAsync<CommandDto>(() => RawContent(HttpMethod.Put, $"api/commands/{id}/content", content, expectedSha256), ct);
+        SendAsync<CommandDto>(() => RawContent(HttpMethod.Put, $"commands/{id}/content", content, expectedSha256), ct);
 
     public Task<byte[]> GetCommandContentAsync(int id, CancellationToken ct = default) =>
-        GetBytesAsync($"api/commands/{id}/content", ct);
+        GetBytesAsync($"commands/{id}/content", ct);
 
     // ---------------- assets ----------------
 
     public Task<List<AssetDto>> ListAssetsAsync(string? search = null, CancellationToken ct = default) =>
-        SendAsync<List<AssetDto>>(() => new HttpRequestMessage(HttpMethod.Get, "api/assets" + Query(("search", search))), ct);
+        SendAsync<List<AssetDto>>(() => new HttpRequestMessage(HttpMethod.Get, "assets" + Query(("search", search))), ct);
 
     public Task<AssetDto> GetAssetAsync(int id, CancellationToken ct = default) =>
-        SendAsync<AssetDto>(() => new HttpRequestMessage(HttpMethod.Get, $"api/assets/{id}"), ct);
+        SendAsync<AssetDto>(() => new HttpRequestMessage(HttpMethod.Get, $"assets/{id}"), ct);
 
     /// <summary>Creates a new asset (multipart upload). 409 when the path is taken.</summary>
     public Task<AssetDto> UploadAssetAsync(string relativePath, byte[] content, string? description = null, CancellationToken ct = default) =>
@@ -150,28 +175,28 @@ public sealed class CmdManagerApiClient : IDisposable
             };
             if (description is not null)
                 form.Add(new StringContent(description), "description");
-            return new HttpRequestMessage(HttpMethod.Post, "api/assets") { Content = form };
+            return new HttpRequestMessage(HttpMethod.Post, "assets") { Content = form };
         }, ct);
 
     public Task<AssetDto> ReplaceAssetContentAsync(int id, byte[] content, string? expectedSha256 = null, CancellationToken ct = default) =>
-        SendAsync<AssetDto>(() => RawContent(HttpMethod.Put, $"api/assets/{id}/content", content, expectedSha256), ct);
+        SendAsync<AssetDto>(() => RawContent(HttpMethod.Put, $"assets/{id}/content", content, expectedSha256), ct);
 
     public Task<AssetDto> UpdateAssetAsync(int id, AssetUpdateRequest request, CancellationToken ct = default) =>
-        SendAsync<AssetDto>(() => Json(HttpMethod.Put, $"api/assets/{id}", request), ct);
+        SendAsync<AssetDto>(() => Json(HttpMethod.Put, $"assets/{id}", request), ct);
 
     public Task DeleteAssetAsync(int id, string? expectedSha256 = null, CancellationToken ct = default) =>
-        SendAsync(() => new HttpRequestMessage(HttpMethod.Delete, $"api/assets/{id}" + Query(("expectedSha256", expectedSha256))), ct);
+        SendAsync(() => new HttpRequestMessage(HttpMethod.Delete, $"assets/{id}" + Query(("expectedSha256", expectedSha256))), ct);
 
     public Task<byte[]> GetAssetContentAsync(int id, CancellationToken ct = default) =>
-        GetBytesAsync($"api/assets/{id}/content", ct);
+        GetBytesAsync($"assets/{id}/content", ct);
 
     // ---------------- library ----------------
 
     public Task<ManifestDto> GetManifestAsync(CancellationToken ct = default) =>
-        SendAsync<ManifestDto>(() => new HttpRequestMessage(HttpMethod.Get, "api/library/manifest"), ct);
+        SendAsync<ManifestDto>(() => new HttpRequestMessage(HttpMethod.Get, "library/manifest"), ct);
 
     public Task<ImportResult> ImportAsync(ImportRequest request, CancellationToken ct = default) =>
-        SendAsync<ImportResult>(() => Json(HttpMethod.Post, "api/library/import", request), ct);
+        SendAsync<ImportResult>(() => Json(HttpMethod.Post, "library/import", request), ct);
 
     public Task<byte[]> GetContentAsync(ManifestEntry entry, CancellationToken ct = default) =>
         entry.Type == LibraryItemType.Command ? GetCommandContentAsync(entry.Id, ct) : GetAssetContentAsync(entry.Id, ct);
@@ -190,6 +215,16 @@ public sealed class CmdManagerApiClient : IDisposable
         if (!string.IsNullOrEmpty(expectedSha256))
             req.Headers.TryAddWithoutValidation("If-Match", "\"" + expectedSha256 + "\"");
         return req;
+    }
+
+    /// <summary>
+    /// Request URIs must be relative without a leading slash ("auth/login"): a leading "/" would resolve against the
+    /// host root and drop the "/api/" of <see cref="HttpClient.BaseAddress"/>.
+    /// </summary>
+    internal static void EnsureRelative(Uri? uri)
+    {
+        if (uri is null || uri.IsAbsoluteUri || uri.OriginalString.StartsWith('/'))
+            throw new InvalidOperationException($"API request URI '{uri}' must be relative without a leading slash.");
     }
 
     private static string Query(params (string Key, string? Value)[] parts)
@@ -219,6 +254,7 @@ public sealed class CmdManagerApiClient : IDisposable
     private async Task<HttpResponseMessage> SendRawAsync(Func<HttpRequestMessage> factory, CancellationToken ct)
     {
         using var req = factory();
+        EnsureRelative(req.RequestUri);
         var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct);
         try
         {

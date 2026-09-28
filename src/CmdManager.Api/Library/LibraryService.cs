@@ -70,7 +70,7 @@ public sealed class LibraryService(CmdManagerDbContext db, IOptions<LibraryOptio
     public static AssetDto ToDto(Asset a) =>
         new(a.Id, a.Name, a.Folder, a.RelativePath, a.Description, a.Size, a.Sha256, a.CreatedUtc, a.UpdatedUtc);
 
-    /// <summary>Bulk import (POST /api/library/import). One SaveChanges per request.</summary>
+    /// <summary>Bulk import (POST {PathBase}/library/import). One SaveChanges per request.</summary>
     public async Task<ImportResult> ImportAsync(int userId, ImportRequest request, CancellationToken ct)
     {
         int created = 0, updated = 0, unchanged = 0, skipped = 0;

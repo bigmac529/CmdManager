@@ -9,7 +9,7 @@
 
         <TextBlock x:Name="MessageText" Foreground="DarkRed" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed" />
 
-        <TextBlock Text="Server" />
+        <TextBlock Text="API URL (e.g. https://cmdmanager.socha3.com/api/)" />
         <TextBox x:Name="ServerBox" />
         <TextBlock Text="User name" Margin="0,6,0,0" />
         <TextBox x:Name="UserBox" />

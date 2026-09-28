@@ -12,7 +12,7 @@ public static class AssetEndpoints
 {
     public static RouteGroupBuilder MapAssetEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/assets").WithTags("Assets").RequireAuthorization();
+        var g = app.MapGroup("/assets").WithTags("Assets").RequireAuthorization();
         g.MapGet("/", List);
         g.MapGet("/{id:int}", Get);
         g.MapGet("/{id:int}/content", Content);
@@ -86,7 +86,7 @@ public static class AssetEndpoints
         db.Assets.Add(asset);
         if (await CommandEndpoints.TrySaveAsync(db, lp.Value, ct) is { } conflict)
             return conflict;
-        return TypedResults.Created($"/api/assets/{asset.Id}", LibraryService.ToDto(asset));
+        return TypedResults.Created($"{http.Request.PathBase}/assets/{asset.Id}", LibraryService.ToDto(asset));
     }
 
     internal static async Task<Results<Ok<AssetDto>, NotFound, ProblemHttpResult>> ReplaceContent(

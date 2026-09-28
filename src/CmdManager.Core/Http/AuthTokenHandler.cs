@@ -10,10 +10,13 @@ namespace CmdManager.Core.Http;
 /// expires, and once after a 401; when refreshing is impossible it clears the session and raises
 /// <see cref="AuthSession.Expired"/> (the app stops background sync and shows the Login window).
 /// </summary>
-public sealed class AuthTokenHandler(AuthSession session) : DelegatingHandler
+/// <param name="session">Shared login state.</param>
+/// <param name="baseAddress">API base URL (e.g. https://cmdmanager.socha3.com/api/), used for the refresh call. When null
+/// it is derived from each request URI (everything before the first known route segment).</param>
+public sealed class AuthTokenHandler(AuthSession session, Uri? baseAddress = null) : DelegatingHandler
 {
     private static readonly TimeSpan RefreshSkew = TimeSpan.FromSeconds(60);
-    private static readonly string[] AnonymousPaths = ["api/auth/login", "api/auth/register", "api/auth/refresh", "api/auth/config", "health"];
+    private static readonly string[] AnonymousPaths = ["auth/login", "auth/register", "auth/refresh", "auth/config", "health"];
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -76,7 +79,7 @@ public sealed class AuthTokenHandler(AuthSession session) : DelegatingHandler
             if (!ReferenceEquals(current, used))
                 return current; // another request already refreshed
 
-            using var req = new HttpRequestMessage(HttpMethod.Post, ApiBase(requestUri) + "api/auth/refresh")
+            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(baseAddress ?? ApiBase(requestUri), "auth/refresh"))
             {
                 Content = JsonContent.Create(new RefreshRequest(current.RefreshToken), options: CmdManagerJson.Options)
             };
@@ -97,12 +100,24 @@ public sealed class AuthTokenHandler(AuthSession session) : DelegatingHandler
         }
     }
 
-    /// <summary>"https://host/prefix/" from "https://host/prefix/api/...".</summary>
-    internal static string ApiBase(Uri requestUri)
+    /// <summary>First path segments of the API's own routes (the app maps /auth, /commands, ... under its path base).</summary>
+    private static readonly string[] RouteRoots = ["auth", "commands", "assets", "library", "health"];
+
+    /// <summary>
+    /// "https://host/api/" from "https://host/api/commands/5" (everything before the first known route segment);
+    /// "https://host/" when none matches.
+    /// </summary>
+    internal static Uri ApiBase(Uri requestUri)
     {
-        var s = requestUri.GetLeftPart(UriPartial.Path);
-        var i = s.IndexOf("/api/", StringComparison.OrdinalIgnoreCase);
-        return i >= 0 ? s[..(i + 1)] : requestUri.GetLeftPart(UriPartial.Authority) + "/";
+        var segments = requestUri.AbsolutePath.Split('/');
+        var prefix = new List<string>();
+        foreach (var seg in segments.Skip(1))
+        {
+            if (RouteRoots.Contains(Uri.UnescapeDataString(seg), StringComparer.OrdinalIgnoreCase))
+                return new Uri(requestUri.GetLeftPart(UriPartial.Authority) + "/" + string.Concat(prefix.Select(p => p + "/")));
+            prefix.Add(seg);
+        }
+        return new Uri(requestUri.GetLeftPart(UriPartial.Authority) + "/");
     }
 
     protected override void Dispose(bool disposing)

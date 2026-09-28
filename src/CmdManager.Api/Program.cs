@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using CmdManager.Api;
 using CmdManager.Api.Auth;
 using CmdManager.Api.Data;
+using CmdManager.Api.Hosting;
 using CmdManager.Api.Library;
 using CmdManager.Core.Http;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -63,12 +64,12 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         };
     });
 // Fallback policy: every endpoint requires an authenticated user unless it is explicitly marked AllowAnonymous
-// (only "/", /health and /api/auth/{config,register,login,refresh}).
+// (only "/", /health and /auth/{config,register,login,refresh}; public URLs carry the /api path base).
 builder.Services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder(JwtBearerDefaults.AuthenticationScheme)
     .RequireAuthenticatedUser()
     .Build());
 
-// ---- rate limit /api/auth/* per client IP ----
+// ---- rate limit /auth/* per client IP ----
 builder.Services.AddRateLimiter(_ => { });
 builder.Services.AddOptions<RateLimiterOptions>().Configure<IOptions<AuthOptions>>((o, auth) =>
 {
@@ -92,6 +93,12 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
+// Public URLs live under /api (IIS application "/api" on the cmdmanager.socha3.com site). Under IIS in-process
+// hosting ANCM already sets PathBase=/api and this is a no-op; under Kestrel (local dev) it strips the /api prefix
+// itself so the URLs match production. Hosting:PathBase (default "/api", "" to disable). Must run before routing.
+app.UseConfiguredPathBase();
+app.UseRouting();
+
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 if (!app.Environment.IsDevelopment())
@@ -102,7 +109,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi().AllowAnonymous(); // /openapi/v1.json
     app.UseSwaggerUI(o =>
     {
-        o.SwaggerEndpoint("/openapi/v1.json", "CmdManager API v1");
+        o.SwaggerEndpoint("../openapi/v1.json", "CmdManager API v1"); // relative: works under the /api path base
         o.RoutePrefix = "swagger";
     });
 }
@@ -111,7 +118,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
-app.MapGet("/", () => Results.Text("CmdManager API. See /health.", "text/plain")).ExcludeFromDescription().AllowAnonymous();
+app.MapGet("/", (HttpRequest req) => Results.Text($"CmdManager API. See {req.PathBase}/health.", "text/plain")).ExcludeFromDescription().AllowAnonymous();
 app.MapHealthChecks("/health", new HealthCheckOptions
 {
     ResultStatusCodes =

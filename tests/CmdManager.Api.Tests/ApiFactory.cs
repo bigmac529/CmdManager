@@ -15,10 +15,20 @@ public class ApiFactory : WebApplicationFactory<Program>
     private readonly string _connectionString = $"Data Source=file:cmdlib-{Guid.NewGuid():N}?mode=memory&cache=shared";
     private readonly SqliteConnection _keepAlive;
 
+    /// <summary>Clients talk to http://localhost/api/ like production (https://cmdmanager.socha3.com/api/).</summary>
+    public static readonly Uri ApiBase = new("http://localhost/api/");
+
     public ApiFactory()
     {
         _keepAlive = new SqliteConnection(_connectionString);
         _keepAlive.Open();
+        ClientOptions.BaseAddress = ApiBase;
+    }
+
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.BaseAddress = ApiBase;
     }
 
     public Dictionary<string, string?> Settings { get; } = new();
@@ -40,7 +50,7 @@ public class ApiFactory : WebApplicationFactory<Program>
     public CmdManagerApiClient NewClient()
     {
         var session = new AuthSession();
-        return new CmdManagerApiClient(CreateDefaultClient(new AuthTokenHandler(session)), session);
+        return new CmdManagerApiClient(CreateDefaultClient(new AuthTokenHandler(session, ApiBase)), session);
     }
 
     public async Task<CmdManagerApiClient> RegisteredClientAsync(string? userName = null, string password = "correct horse battery")

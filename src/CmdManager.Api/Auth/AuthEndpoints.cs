@@ -17,7 +17,7 @@ public static partial class AuthEndpoints
 
     public static RouteGroupBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/auth").WithTags("Auth").RequireRateLimiting(RateLimitPolicy);
+        var g = app.MapGroup("/auth").WithTags("Auth").RequireRateLimiting(RateLimitPolicy);
 
         g.MapGet("/config", (IOptions<AuthOptions> o) =>
             TypedResults.Ok(new AuthConfigDto(o.Value.AllowRegistration, o.Value.MinPasswordLength))).AllowAnonymous();
@@ -32,7 +32,7 @@ public static partial class AuthEndpoints
     }
 
     internal static async Task<Results<Created<AuthResponse>, ValidationProblem, ProblemHttpResult>> Register(
-        RegisterRequest req, CmdManagerDbContext db, IOptions<AuthOptions> authOptions, TokenService tokens,
+        RegisterRequest req, HttpContext http, CmdManagerDbContext db, IOptions<AuthOptions> authOptions, TokenService tokens,
         IPasswordHasher<User> hasher, TimeProvider time, CancellationToken ct)
     {
         var opts = authOptions.Value;
@@ -78,7 +78,7 @@ public static partial class AuthEndpoints
         user.LastLoginUtc = user.CreatedUtc;
         var auth = tokens.Issue(user, db);
         await db.SaveChangesAsync(ct);
-        return TypedResults.Created("/api/auth/me", auth);
+        return TypedResults.Created($"{http.Request.PathBase}/auth/me", auth);
     }
 
     internal static async Task<Results<Ok<AuthResponse>, ProblemHttpResult>> Login(

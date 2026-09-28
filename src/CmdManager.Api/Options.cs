@@ -35,7 +35,7 @@ public sealed class AuthOptions
     public int MaxFailedLogins { get; set; } = 5;
     public int LockoutMinutes { get; set; } = 5;
 
-    /// <summary>Requests per minute per client IP for /api/auth/*; 0 disables the limiter.</summary>
+    /// <summary>Requests per minute per client IP for {PathBase}/auth/*; 0 disables the limiter.</summary>
     public int RateLimitPerMinute { get; set; } = 30;
 }
 

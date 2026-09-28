@@ -71,7 +71,7 @@ public partial class App : Application
     /// <summary>Switches to another server URL (clears the session: tokens are per server).</summary>
     public static void ChangeServer(string serverUrl)
     {
-        var normalized = CmdManagerApiClient.NormalizeServerUrl(serverUrl).ToString().TrimEnd('/');
+        var normalized = CmdManagerApiClient.NormalizeServerUrl(CmdManagerApiClient.UpgradeServerUrl(serverUrl)).ToString(); // keeps the trailing "/" (…/api/)
         if (string.Equals(normalized, Settings.ServerUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
             return;
         Session.Set(null);

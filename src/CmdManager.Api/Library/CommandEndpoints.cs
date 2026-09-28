@@ -11,7 +11,7 @@ public static class CommandEndpoints
 {
     public static RouteGroupBuilder MapCommandEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/commands").WithTags("Commands").RequireAuthorization();
+        var g = app.MapGroup("/commands").WithTags("Commands").RequireAuthorization();
         g.MapGet("/", List);
         g.MapGet("/{id:int}", Get);
         g.MapGet("/{id:int}/content", Content);
@@ -90,7 +90,7 @@ public static class CommandEndpoints
         db.Commands.Add(cmd);
         if (await TrySaveAsync(db, path.Value, ct) is { } conflict)
             return conflict;
-        return TypedResults.Created($"/api/commands/{cmd.Id}", LibraryService.ToDto(cmd));
+        return TypedResults.Created($"{http.Request.PathBase}/commands/{cmd.Id}", LibraryService.ToDto(cmd));
     }
 
     internal static async Task<Results<Ok<CommandDto>, NotFound, ValidationProblem, ProblemHttpResult>> Update(

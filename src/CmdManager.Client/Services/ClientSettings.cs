@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using CmdManager.Core.Http;
 
 namespace CmdManager.Client.Services;
 
@@ -19,7 +20,7 @@ public sealed class CsxIntegrationBackup
 public sealed class ClientSettings
 {
     /// <summary>API base URL.</summary>
-    public string ServerUrl { get; set; } = "https://cmdmanager.socha3.com";
+    public string ServerUrl { get; set; } = CmdManagerApiClient.DefaultServerUrl;
     public string? LastUserName { get; set; }
 
     /// <summary>The command folder (synced from the DB, on the user PATH, CMDS points here).</summary>
@@ -52,7 +53,11 @@ public sealed class ClientSettings
         try
         {
             if (File.Exists(AppPaths.SettingsFile))
-                return JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(AppPaths.SettingsFile)) ?? new ClientSettings();
+            {
+                var settings = JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(AppPaths.SettingsFile)) ?? new ClientSettings();
+                settings.ServerUrl = CmdManagerApiClient.UpgradeServerUrl(settings.ServerUrl); // old root URL → /api/
+                return settings;
+            }
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {

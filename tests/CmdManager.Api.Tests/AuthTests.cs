@@ -11,7 +11,7 @@ public class AuthTests(ApiFactory factory) : IClassFixture<ApiFactory>
     [Fact]
     public async Task Health_is_healthy_and_reports_database()
     {
-        var resp = await factory.CreateClient().GetAsync("/health");
+        var resp = await factory.CreateClient().GetAsync("health");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var body = await resp.Content.ReadAsStringAsync();
         Assert.Contains("\"status\":\"Healthy\"", body);
@@ -83,11 +83,11 @@ public class AuthTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Theory]
-    [InlineData("/api/auth/me")]
-    [InlineData("/api/commands")]
-    [InlineData("/api/assets")]
-    [InlineData("/api/library/manifest")]
-    [InlineData("/api/library/export")]
+    [InlineData("auth/me")]
+    [InlineData("commands")]
+    [InlineData("assets")]
+    [InlineData("library/manifest")]
+    [InlineData("library/export")]
     public async Task Library_endpoints_require_authentication(string url)
     {
         var resp = await factory.CreateClient().GetAsync(url);
@@ -99,7 +99,7 @@ public class AuthTests(ApiFactory factory) : IClassFixture<ApiFactory>
     {
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "not.a.jwt");
-        var resp = await http.GetAsync("/api/commands");
+        var resp = await http.GetAsync("commands");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -115,7 +115,7 @@ public class AuthTests(ApiFactory factory) : IClassFixture<ApiFactory>
         await client.MeAsync();
 
         var http = factory.CreateClient();
-        var reuse = await http.PostAsJsonAsync("/api/auth/refresh", new RefreshRequest(first.RefreshToken));
+        var reuse = await http.PostAsJsonAsync("auth/refresh", new RefreshRequest(first.RefreshToken));
         Assert.Equal(HttpStatusCode.Unauthorized, reuse.StatusCode);
     }
 
@@ -127,7 +127,7 @@ public class AuthTests(ApiFactory factory) : IClassFixture<ApiFactory>
         await client.LogoutAsync();
         Assert.Null(client.Session);
 
-        var resp = await factory.CreateClient().PostAsJsonAsync("/api/auth/refresh", new RefreshRequest(refresh));
+        var resp = await factory.CreateClient().PostAsJsonAsync("auth/refresh", new RefreshRequest(refresh));
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 

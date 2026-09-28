@@ -209,7 +209,7 @@ public class LibraryTests(ApiFactory factory) : IClassFixture<ApiFactory>
         await api.CreateCommandAsync(new CommandUpsertRequest("a.cmd", "exit"));
         var http = factory.CreateClient();
         http.DefaultRequestHeaders.Authorization = new("Bearer", api.Session!.AccessToken);
-        var resp = await http.GetAsync("/api/library/export");
+        var resp = await http.GetAsync("library/export");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal("application/zip", resp.Content.Headers.ContentType!.MediaType);
         using var zip = new System.IO.Compression.ZipArchive(await resp.Content.ReadAsStreamAsync());

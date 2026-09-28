@@ -12,10 +12,14 @@ CmdManager keeps your library of command-line scripts in one place and puts it o
 **Where the ideas come from.** ExeLibrary kept tools in a shared folder. [CMDs](https://github.com/bigmac529/CMDs) holds the actual `.cmd`/`.bat`/`.csx` scripts. MkNewCmd and CSXScripts supplied the "new command from a template" flow and the `.csx` + `.cmd` wrapper pattern. CmdManager moves the library into SQL Server behind an authenticated API. Each PC then mirrors that library into a local folder on `PATH`, so every script you save runs from any console.
 
 ```
- CmdManager.exe (WPF, per user) ──HTTPS/JWT──► https://cmdmanager.socha3.com (IIS "CmdManager", Cloudflare)
-   │ mirrors to %LOCALAPPDATA%\CmdManager\cmds                 │ EF Core 10
-   └─ folder on user PATH, CMDS=<folder>, .CSX in PATHEXT      └─► SQL Server 2025 Express, DB "CmdManager"
+                                   Cloudflare ─► IIS site cmdmanager.socha3.com
+ browser ──── install/update ────► https://cmdmanager.socha3.com/       C:\WebApps\CmdManager       pool CmdManagerWeb (static ClickOnce files)
+ CmdManager.exe ── HTTPS/JWT ────► https://cmdmanager.socha3.com/api/   C:\WebApps\CmdManager\api   pool CmdManager (IIS application /api, ASP.NET Core in-process)
+   │ mirrors to %LOCALAPPDATA%\CmdManager\cmds                                                        │ EF Core 10, Windows auth
+   └─ folder on user PATH, CMDS=<folder>, .CSX in PATHEXT                                              └─► SQL Server 2025 Express, DB "CmdManager"
 ```
+
+**URL layout.** The API is the IIS application `/api`, and ANCM (in-process) passes `PathBase=/api` to the app. The app's own routes therefore have **no** `/api` prefix (`/health`, `/auth/login`, `/commands`, …), while the public URLs do (`https://cmdmanager.socha3.com/api/health`, `…/api/auth/login`). Under Kestrel (local dev and tests) the app applies the same `/api` prefix itself (`Hosting:PathBase`, default `/api`). That step is skipped when the host has already set a PathBase, so under IIS it is never applied twice (`/api/api/...` gets no route). The client's base URL is `https://cmdmanager.socha3.com/api/` (trailing slash), and every request URI is relative with no leading slash (`auth/login`). The client rejects a leading slash, because it would drop `/api/`.
 
 ## Build and test
 
@@ -30,7 +34,8 @@ The WPF project sets `EnableWindowsTargeting`, so the whole solution builds (the
 
 - **LocalDB** (Windows): `dotnet run --project src/CmdManager.Api --launch-profile http`. This uses `appsettings.Development.json`: database `CmdManager_Dev` on `(localdb)\MSSQLLocalDB`, a dev-only JWT key, and migrations applied at startup.
 - **SQLite** (any OS, no SQL Server): `dotnet run --project src/CmdManager.Api --launch-profile sqlite`. The schema is created with `EnsureCreated` in `cmdmanager-dev.db` (git-ignored). Migrations are SQL Server only.
-- In Development, Swagger UI is at `/swagger` and the OpenAPI document at `/openapi/v1.json`. Both require a token outside Development.
+- Everything is served under `/api` locally too, e.g. `http://localhost:5066/api/health` (point the client at `http://localhost:5066/api/`). Unprefixed paths (`/health`) also answer under Kestrel.
+- In Development, Swagger UI is at `/api/swagger` and the OpenAPI document at `/api/openapi/v1.json`. Neither is mapped outside Development.
 
 ### Configuration keys
 
@@ -44,6 +49,7 @@ Set these in `appsettings.Production.json` next to the DLL (never committed and 
 | `Jwt:AccessTokenMinutes` / `Jwt:RefreshTokenDays` | 60 / 30 | Refresh tokens rotate on every use and are stored hashed. |
 | `Auth:AllowRegistration` (`Auth__AllowRegistration`) | `true` | Set to `false` after creating your account. |
 | `Auth:MinPasswordLength`, `MaxFailedLogins`, `LockoutMinutes`, `RateLimitPerMinute` | 8, 5, 5, 30 | The rate limit applies per IP to `/api/auth/*`. |
+| `Hosting:PathBase` (`Hosting__PathBase`) | `/api` | Prefix applied under Kestrel. Under IIS, ANCM already sets PathBase=/api from the application path and the setting has no effect. `""` disables it. |
 | `Database:Provider` (`Database__Provider`) | `SqlServer` | `Sqlite` for dev only |
 | `Database:MigrateOnStartup` (`Database__MigrateOnStartup`) | `true` | Runs `MigrateAsync` at startup and logs each migration applied. Needs `db_ddladmin`. |
 | `Library:MaxFileBytes` (`Library__MaxFileBytes`) | 104857600 (100 MB) | Per file. |
@@ -51,10 +57,18 @@ Set these in `appsettings.Production.json` next to the DLL (never committed and 
 
 ## Server setup (web server, one time)
 
+IIS layout: one site, two app pools.
+
+| URL | Folder | IIS | App pool |
+|---|---|---|---|
+| `https://cmdmanager.socha3.com/` | `C:\WebApps\CmdManager` | site **CmdManager** (static: ClickOnce `CmdManager.application`, `setup.exe`, `Application Files\`) | **CmdManagerWeb**, No Managed Code |
+| `https://cmdmanager.socha3.com/api/` | `C:\WebApps\CmdManager\api` | **application** `/api` under that site (ASP.NET Core in-process) | **CmdManager**, No Managed Code, identity `IIS APPPOOL\CmdManager` |
+
 1. Install the **ASP.NET Core 10.0 Hosting Bundle** (10.0.1 is installed) and restart IIS (`iisreset`).
-2. Create the app pool **`CmdManager`** with .NET CLR version *No Managed Code* and identity *ApplicationPoolIdentity* (`IIS APPPOOL\CmdManager`).
-3. Create the site **`CmdManager`** at `C:\WebApps\CmdManager`, bound to `cmdmanager.socha3.com` (HTTPS, or HTTP behind Cloudflare, depending on your Cloudflare SSL mode). Grant `IIS APPPOOL\CmdManager` read access to the folder, plus modify on `logs\` if you enable stdout logs.
-4. Database (SQL Server 2025 Express, default instance, Windows auth). Run as a sysadmin:
+2. Create the app pools **`CmdManagerWeb`** (static root) and **`CmdManager`** (API). Both use .NET CLR version *No Managed Code* and *ApplicationPoolIdentity*.
+3. Create the site **`CmdManager`** at `C:\WebApps\CmdManager` with pool `CmdManagerWeb`, bound to `cmdmanager.socha3.com` (HTTPS, or HTTP behind Cloudflare, depending on your Cloudflare SSL mode). Then add the **application** `/api` → `C:\WebApps\CmdManager\api` with pool `CmdManager`. Grant `IIS APPPOOL\CmdManager` read access to the api folder, plus modify on `api\logs\` if you enable stdout logs.
+4. **Root `web.config`:** anything in the root's `<system.webServer>` is inherited by the `/api` application unless it is wrapped in `<location path="." inheritInChildApplications="false">`. That includes handlers, static-content rules, MIME maps for `.application`/`.manifest`/`.deploy`, and rewrite rules. The API's own `web.config` (from `dotnet publish`) wraps its settings the same way.
+5. Database (SQL Server 2025 Express, default instance, Windows auth). Run as a sysadmin:
    ```cmd
    sqlcmd -S . -E -i db\server-setup.sql
    ```
@@ -63,22 +77,35 @@ Set these in `appsettings.Production.json` next to the DLL (never committed and 
    sqlcmd -S . -E -d CmdManager -i db\CmdManager-schema.sql
    ```
    *Express limit:* each database is capped at **50 GB** of data (SQL Server 2025 Express). File contents live in the database (`varbinary(max)`/`nvarchar(max)`), so that cap is the effective library size.
-5. Create `C:\WebApps\CmdManager\appsettings.Production.json` with the connection string and `Jwt:Key` (see above). The deploy never overwrites it.
-6. Check `https://cmdmanager.socha3.com/health`. It returns **200** with `{"status":"Healthy", ... "connected":true,"pendingMigrations":0}`. It returns **503** if the DB is unreachable or migrations are pending.
+6. Create `C:\WebApps\CmdManager\api\appsettings.Production.json` with the connection string and `Jwt:Key` (see above). The deploy never overwrites it.
+7. Check `https://cmdmanager.socha3.com/api/health`. It returns **200** with `{"status":"Healthy", ... "connected":true,"pendingMigrations":0}`. It returns **503** if the DB is unreachable or migrations are pending.
 
 **Cloudflare:** Cloudflare Free and Pro plans reject request bodies over **100 MB** (413). A command upload is JSON with base64 content, so through Cloudflare the practical per-file limit is about 70 MB for commands and a little under 100 MB for multipart asset uploads. It is effectively lower than `Library:MaxFileBytes`. Cloudflare's proxy timeout (100 s) also applies to slow uploads.
 
 ## Deploying the API (GitHub Actions)
 
-`.github/workflows/deploy-api.yml` runs on pushes to `main` that touch `src/CmdManager.Api/**` or `src/CmdManager.Core/**`, and on manual *Run workflow*. It runs on a **self-hosted Windows runner** (`runs-on: [self-hosted, windows]`) on the web server:
+`.github/workflows/deploy-api.yml` runs on pushes to `main` that touch `src/CmdManager.Api/**` or `src/CmdManager.Core/**`, and on manual *Run workflow*. It runs on the **self-hosted Windows runner** on the web server (`runs-on: [self-hosted, windows, cmdmanager]`) in the GitHub **environment `production`**, so any protection rules on that environment (required reviewers, branch restrictions) apply. It only ever writes to the api folder.
 
+Repository variables (Settings → Secrets and variables → Actions → *Variables*):
+
+| Variable | Value | |
+|---|---|---|
+| `DEPLOY_PATH` | `C:\WebApps\CmdManager\api` | Required. The job fails unless it is set and ends in `\api`. |
+| `DEPLOY_BACKUP_ROOT` | `C:\WebApps\_deploy-backups\CmdManager` | Optional. When set, a backup is taken before every deploy. |
+
+Steps:
+
+0. **Guard:** fail unless `DEPLOY_PATH` is non-empty and ends in `\api`, so `/MIR` can never purge the site root that holds the ClickOnce files.
 1. Build, test and `dotnet publish` the API.
-2. Write `app_offline.htm` into `C:\WebApps\CmdManager` (the ASP.NET Core Module stops the app and releases file locks).
-3. `robocopy /MIR` the publish output, excluding `appsettings.Production.json` (and `app_offline.htm`, `logs\`). Exit codes below 8 count as success.
-4. Remove `app_offline.htm`.
-5. Poll `https://cmdmanager.socha3.com/health`, falling back to `http://localhost/health` with `Host: cmdmanager.socha3.com`, up to 20 times. The job fails if it never gets a 200.
+2. **Backup** (only if `DEPLOY_BACKUP_ROOT` is set): robocopy the current api folder to `<DEPLOY_BACKUP_ROOT>\<yyyyMMdd-HHmmss>`, then delete all but the **newest 5** backups. The copy includes `appsettings.Production.json`, so a backup can be restored as-is. File names and contents are not logged (`/NFL /NDL`). The runner account needs modify rights on the backup root.
+3. Write `app_offline.htm` into the api folder (the ASP.NET Core Module stops the app and releases file locks).
+4. `robocopy /MIR` the publish output into the api folder with `/XF appsettings.Production.json app_offline.htm /XD logs`. Robocopy exclusions apply to the purge as well as the copy, so the server's `appsettings.Production.json` is never overwritten and never deleted by `/MIR`. Exit codes below 8 count as success.
+5. Remove `app_offline.htm`.
+6. Poll `https://cmdmanager.socha3.com/api/health`, falling back to `http://localhost/api/health` with `Host: cmdmanager.socha3.com`, up to 20 times. The job fails if it never gets a 200.
 
-> **The job stays queued until a runner exists.** Register a **repo-scoped** runner for `bigmac529/CmdManager` (Settings → Actions → Runners → New self-hosted runner → Windows). Run it as a service under a **non-admin** local account. That account needs modify rights on `C:\WebApps\CmdManager` and nothing else. `actions/setup-dotnet` installs the .NET 10 SDK into the runner's tool cache.
+**Restoring a backup:** take the API offline by putting `app_offline.htm` in the api folder. Then run `robocopy <backup> C:\WebApps\CmdManager\api /MIR /XF app_offline.htm /XD logs` and delete `app_offline.htm`.
+
+> **The job stays queued until a runner exists.** Register a **repo-scoped** runner for `bigmac529/CmdManager` with the extra label **`cmdmanager`** (Settings → Actions → Runners → New self-hosted runner → Windows). Run it as a service under a **non-admin** local account. That account needs modify rights on `C:\WebApps\CmdManager\api` and the backup root, and nothing else. `actions/setup-dotnet` installs the .NET 10 SDK into the runner's tool cache. The scripts run in Windows PowerShell 5.1 (`shell: powershell`), so PowerShell 7 is not required.
 
 ## Adding a migration
 
@@ -94,7 +121,7 @@ dotnet tool run dotnet-ef migrations script --idempotent -p src/CmdManager.Api -
 dotnet tool run dotnet-ef migrations has-pending-model-changes -p src/CmdManager.Api -s src/CmdManager.Api
 ```
 
-The design-time factory uses the connection string from `ConnectionStrings__CmdManager` (defaulting to LocalDB), but `migrations add` and `script` do not connect. On the next deploy the app applies the new migration at startup (`Database:MigrateOnStartup`), and `/health` stays 503 until it has been applied.
+The design-time factory uses the connection string from `ConnectionStrings__CmdManager` (defaulting to LocalDB), but `migrations add` and `script` do not connect. On the next deploy the app applies the new migration at startup (`Database:MigrateOnStartup`), and `/api/health` stays 503 until it has been applied.
 
 ## Desktop client
 
@@ -106,17 +133,25 @@ On Windows with Visual Studio 2026 / MSBuild (`dotnet publish` cannot produce Cl
 msbuild src\CmdManager.Client\CmdManager.Client.csproj /restore /t:Publish /p:PublishProfile=ClickOnceProfile /p:CmdManagerBuildNumber=<N>
 ```
 
-Then copy `src\CmdManager.Client\bin\publish\clickonce\` to the site's `/install/` folder. The profile mirrors SochaDiff:
+Then upload `src\CmdManager.Client\bin\publish\clickonce\` to the **site root** `C:\WebApps\CmdManager`. The install, publish and update URL is `https://cmdmanager.socha3.com/`.
+
+> **Never delete the `api` folder when uploading ClickOnce files.** The API application lives in `C:\WebApps\CmdManager\api`, inside the root. Copy with the folder excluded, and never use `/MIR` (or "delete files not in source") on the root without `/XD api`. Also leave the root `web.config` in place:
+> ```cmd
+> robocopy src\CmdManager.Client\bin\publish\clickonce C:\WebApps\CmdManager /E /XD api /XF web.config
+> ```
+
+The profile mirrors SochaDiff:
 
 - Framework-dependent win-x64, with the .NET 10 Desktop Runtime bootstrapper.
 - Checks for updates before startup, and every version is required.
 - Version is `1.0.<N>.0`.
+- `PublishUrl`/`InstallUrl`/`UpdateUrl` = `https://cmdmanager.socha3.com/`.
 - Manifests are unsigned. Pass `/p:SignManifests=true /p:ManifestCertificateThumbprint=...` and always use the same certificate.
-- **Placeholder:** `InstallUrl` = `https://cmdmanager.socha3.com/install/`. That folder or virtual directory does not exist yet.
+- The root static site needs MIME types for `.application` (`application/x-ms-application`), `.manifest` (`application/x-ms-manifest`) and `.deploy` (`application/octet-stream`). Recent IIS versions include the first two.
 
 ### First run
 
-1. Log in, or create an account (the server URL defaults to `https://cmdmanager.socha3.com` and can be changed on the login screen).
+1. Log in, or create an account (the API URL defaults to `https://cmdmanager.socha3.com/api/` and can be changed on the login screen). Settings saved by older builds that point at the site root are moved to `/api/` automatically.
 2. The client creates the command folder `%LOCALAPPDATA%\CmdManager\cmds`. It adds the folder to the **user** `PATH` (keeping `REG_EXPAND_SZ`) and sets `CMDS` to it. It then sets up `.csx` integration (below) and broadcasts `WM_SETTINGCHANGE`, so new consoles see the changes. The status bar shows `Command folder: … (on PATH)`.
 3. Use **Import folder…** to upload an existing folder such as a clone of CMDs. Script kinds (`.cmd .bat .csx .ps1 .rdp`) and other UTF-8 text files become commands, `.exe`/`.lnk` become commands only at the root, and everything else becomes an asset. `bin/obj/.git/.vs` are skipped.
 4. The library is then mirrored into the command folder.
@@ -181,12 +216,12 @@ The client uses a single `HttpClient` with `AuthTokenHandler` (a `DelegatingHand
 
 ## API
 
-All endpoints require a JWT bearer token (fallback authorization policy) **except** `/`, `/health`, `/api/auth/config`, `/api/auth/register`, `/api/auth/login` and `/api/auth/refresh`. Every library query is filtered by the token's user id, so users never see each other's files. The tests assert both rules for every endpoint.
+Base URL: **`https://cmdmanager.socha3.com/api/`**. The paths below are public paths; the app's own routes are the same without `/api`. All endpoints require a JWT bearer token (fallback authorization policy) **except** `/api/`, `/api/health`, `/api/auth/config`, `/api/auth/register`, `/api/auth/login` and `/api/auth/refresh`. Unknown paths also answer 401 to anonymous callers. Every library query is filtered by the token's user id, so users never see each other's files. The tests assert both rules for every endpoint.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/` | Plain-text banner |
-| GET | `/health` | 200 Healthy / 503 Unhealthy: DB connected, pending migrations = 0 |
+| GET | `/api/` | Plain-text banner |
+| GET | `/api/health` | 200 Healthy / 503 Unhealthy: DB connected, pending migrations = 0 |
 | GET | `/api/auth/config` | `{ allowRegistration, minPasswordLength }` |
 | POST | `/api/auth/register` | 201 + tokens. 403 when registration is off, 409 when the name is taken |
 | POST | `/api/auth/login` | 200 + tokens. 401 bad credentials, 429 locked out, 403 disabled |
@@ -202,7 +237,7 @@ All endpoints require a JWT bearer token (fallback authorization policy) **excep
 | DELETE | `/api/commands/{id}?expectedSha256=` | Mismatch → **409** |
 | GET | `/api/assets`, `/api/assets/{id}`, `/api/assets/{id}/content` | |
 | POST | `/api/assets` | multipart: `path`, `file`, `description` |
-| PUT | `/api/assets/{id}/content` | multipart, `If-Match` → **409** |
+| PUT | `/api/assets/{id}/content` | Raw body, `If-Match` → **409** |
 | PUT | `/api/assets/{id}` | Path/description, `expectedSha256` |
 | DELETE | `/api/assets/{id}?expectedSha256=` | |
 | GET | `/api/library/manifest` | `{ type, id, relativePath, sha256, size, updatedUtc }` for every file (drives sync) |
@@ -224,8 +259,8 @@ Paths are unique per user across both tables (enforced in the service). All time
 
 ## Placeholders / TODO
 
-- `InstallUrl` https://cmdmanager.socha3.com/install/: create the folder or virtual directory and publish the first ClickOnce build.
+- Publish the first ClickOnce build to the site root (https://cmdmanager.socha3.com/). Remember `/XD api`.
 - ClickOnce manifests are unsigned. Choose a certificate (e.g. the CN=Socha3 one SochaDiff uses) before the first public release.
 - Self-hosted runner not registered yet, so deploys queue.
-- `appsettings.Production.json` (connection string + Jwt:Key) must be created on the server by hand.
+- `C:\WebApps\CmdManager\api\appsettings.Production.json` (connection string + Jwt:Key) must be created on the server by hand.
 - No app icon yet, no password change/reset UI, and no admin UI for disabling users (`Users.IsDisabled` exists).
