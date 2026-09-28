@@ -10,6 +10,8 @@
     <AssemblyName>CmdManager</AssemblyName>
     <Product>CmdManager</Product>
     <AssemblyTitle>CmdManager</AssemblyTitle>
+    <!-- English only: don't ship satellite resource folders (cs, de, ...) from dependencies. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 
     <!-- ClickOnce version: 1.0.<CmdManagerBuildNumber>.0 (pass /p:CmdManagerBuildNumber=N when publishing). -->
     <CmdManagerBuildNumber Condition="'$(CmdManagerBuildNumber)' == ''">0</CmdManagerBuildNumber>

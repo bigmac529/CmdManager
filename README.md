@@ -150,7 +150,7 @@ msbuild src\CmdManager.Client\CmdManager.Client.csproj /restore /t:Publish /p:Pu
 
 The profile:
 
-- **Self-contained win-x64:** the .NET 10 Desktop Runtime is bundled, so nothing needs to be installed first. The first install is about 175 MB. Updates only download files whose hash changed. `/p:CmdManagerSelfContained=false` builds framework-dependent instead, with the Desktop Runtime as a `setup.exe` prerequisite.
+- **Framework-dependent win-x64 (about 1 MB):** needs the **.NET 10 Desktop Runtime (x64)** ([download](https://dotnet.microsoft.com/download/dotnet/10.0)). `setup.exe` checks for the runtime and installs it from Microsoft when Visual Studio's `Microsoft.NetCore.DesktopRuntime.10.0.x64` bootstrapper package is on the build machine; the workflow detects the package and turns the prerequisite off if it's missing. The landing page always states the requirement. Launching without the runtime shows Windows' ".NET is required" dialog. `/p:CmdManagerSelfContained=true` bundles the runtime instead (~175 MB). Satellite resources are English only (`SatelliteResourceLanguages=en`).
 - Checks `https://cmdmanager.socha3.com/` for updates before startup, and every version is required.
 - Version is `1.0.<N>.0`, where N is the workflow run number.
 - Manifests are **unsigned**, so Windows shows "Unknown publisher". To sign, pass `/p:SignManifests=true /p:ManifestCertificateThumbprint=...` and always use the same certificate.
