@@ -38,7 +38,7 @@ public sealed class SyncTests(ApiFactory factory) : IClassFixture<ApiFactory>, I
     public async Task Import_folder_then_pull_reproduces_it_byte_for_byte()
     {
         var api = await factory.RegisteredClientAsync();
-        var src = Dir("CMDs");
+        var src = Dir("import-source");
         Write(src, "g.cmd", "start \"\" \"https://google.com/search?q=%*\"\r\nexit\r\n");
         Write(src, "New.csx", "\uFEFF#r \"CSXScripts/CSXScripts.dll\"\r\nusing CSXScripts;\r\nNew.Main(Env.ScriptArgs.ToArray());");
         Write(src, "RDPs/Work PC.rdp", [0xFF, 0xFE, 0x66, 0x00, 0x75, 0x00]);

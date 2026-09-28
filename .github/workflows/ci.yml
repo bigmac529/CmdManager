@@ -15,8 +15,13 @@ env:
 
 jobs:
   build-test:
-    # EnableWindowsTargeting lets the WPF client compile on Linux; tests are platform-neutral.
-    runs-on: ubuntu-latest
+    # Run on both: Linux proves EnableWindowsTargeting builds; Windows catches case-insensitive
+    # filesystem and path-separator differences the deploy runner will hit.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
