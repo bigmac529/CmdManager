@@ -23,6 +23,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The IIS config that dotnet publish ships with the API (checked by WebConfigTests). -->
+    <None Include="..\..\src\CmdManager.Api\web.config" Link="api-web.config" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 
