@@ -1,0 +1,43 @@
+<Window x:Class="CmdManager.Client.Views.NewCommandWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="New command" Width="560" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False">
+    <StackPanel Margin="14">
+        <TextBlock Text="Template" />
+        <ComboBox x:Name="TemplateBox" DisplayMemberPath="Title" SelectionChanged="Template_Changed" Margin="2" />
+
+        <TextBlock Text="Name (what you type at the prompt, e.g. g, cdsrc, hello)" Margin="0,8,0,0" />
+        <TextBox x:Name="NameBox" TextChanged="Name_TextChanged" />
+
+        <TextBlock Text="Folder (optional, e.g. PSScripts; leave empty for the command folder root)" Margin="0,8,0,0" />
+        <TextBox x:Name="FolderBox" />
+
+        <StackPanel x:Name="TargetPanel">
+            <TextBlock Text="Target to start (program, folder or URL)" Margin="0,8,0,0" />
+            <TextBox x:Name="TargetBox" />
+        </StackPanel>
+
+        <StackPanel x:Name="CsxPanel" Margin="0,8,0,0">
+            <CheckBox x:Name="WrapperBox" Content="Also create a name.cmd wrapper" />
+            <TextBlock x:Name="CsxInfo" Foreground="Gray" TextWrapping="Wrap" Margin="18,2,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock x:Name="DotnetScriptStatus" VerticalAlignment="Center" />
+                <Button x:Name="InstallButton" Content="Install dotnet-script" Click="Install_Click" Visibility="Collapsed" Margin="8,0,0,0" />
+            </StackPanel>
+        </StackPanel>
+
+        <TextBlock Text="Description (optional)" Margin="0,8,0,0" />
+        <TextBox x:Name="DescriptionBox" />
+
+        <TextBlock Text="Files" Margin="0,8,0,0" Foreground="Gray" />
+        <TextBlock x:Name="FilesText" FontFamily="Consolas" TextWrapping="Wrap" />
+        <TextBlock x:Name="NoteText" Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,0" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="CreateButton" Content="Create" IsDefault="True" Style="{StaticResource PrimaryButton}" Click="Create_Click" />
+            <Button Content="Cancel" IsCancel="True" />
+        </StackPanel>
+        <TextBlock x:Name="StatusText" Foreground="DarkRed" TextWrapping="Wrap" Margin="0,6,0,0" />
+    </StackPanel>
+</Window>

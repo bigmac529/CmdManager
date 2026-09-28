@@ -1,0 +1,73 @@
+<Window x:Class="CmdManager.Client.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CmdManager - Settings" Width="680" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False">
+    <StackPanel Margin="14">
+        <GroupBox Header="Command folder (synced from the library, on your PATH)" Padding="6">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Apply" Click="ApplyFolder_Click" ToolTip="Use this folder: moves the PATH entry and CMDS, then syncs into it" />
+                    <Button DockPanel.Dock="Right" Content="Browse..." Click="BrowseFolder_Click" />
+                    <TextBox x:Name="FolderBox" />
+                </DockPanel>
+                <TextBlock x:Name="PathStatus" Margin="2,4,0,0" />
+                <TextBlock x:Name="CmdsStatus" Margin="2,2,0,0" Foreground="Gray" />
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Content="Add to PATH" Click="AddToPath_Click" />
+                    <Button Content="Remove from PATH" Click="RemoveFromPath_Click" />
+                </StackPanel>
+                <TextBlock Foreground="Gray" TextWrapping="Wrap" Margin="2,4,0,0"
+                           Text="Kept in %LOCALAPPDATA%\CmdManager (not the ClickOnce install folder, which changes with every update). Open a new cmd window after changing PATH." />
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="C# scriptlets (.csx)" Padding="6" Margin="0,8,0,0">
+            <StackPanel>
+                <TextBlock x:Name="CsxStatusText" FontWeight="SemiBold" />
+                <TextBlock x:Name="CsxDetailText" Foreground="Gray" TextWrapping="Wrap" FontFamily="Consolas" Margin="0,2,0,0" />
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Content="Repair" Click="RepairCsx_Click" ToolTip="Per-user PATHEXT + .csx file association (no admin needed)" />
+                    <Button Content="Remove integration" Click="RemoveCsx_Click" ToolTip="Restores the previous PATHEXT and .csx association" />
+                </StackPanel>
+
+                <DockPanel Margin="0,8,0,0">
+                    <TextBlock Text="Runner:" VerticalAlignment="Center" Width="110" />
+                    <ComboBox x:Name="RunnerBox" IsEditable="True" Margin="2">
+                        <ComboBoxItem Content="dotnet script" />
+                        <ComboBoxItem Content="scriptcs" />
+                    </ComboBox>
+                </DockPanel>
+                <CheckBox x:Name="WrapperBox" IsThreeState="True" Margin="110,4,0,0"
+                          Content="Create name.cmd wrappers for new scriptlets (indeterminate = only when .csx is not executable)" />
+                <StackPanel Orientation="Horizontal" Margin="110,6,0,0">
+                    <TextBlock x:Name="DotnetScriptStatus" VerticalAlignment="Center" />
+                    <Button x:Name="InstallButton" Content="Install dotnet-script" Click="Install_Click" Visibility="Collapsed" Margin="8,0,0,0" />
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="General" Padding="6" Margin="0,8,0,0">
+            <StackPanel>
+                <DockPanel>
+                    <TextBlock Text="External editor:" VerticalAlignment="Center" Width="110" />
+                    <Button DockPanel.Dock="Right" Content="Browse..." Click="BrowseEditor_Click" />
+                    <TextBox x:Name="EditorBox" />
+                </DockPanel>
+                <DockPanel>
+                    <TextBlock Text="Background sync:" VerticalAlignment="Center" Width="110" />
+                    <TextBlock DockPanel.Dock="Right" Text="minutes (0 = off)" VerticalAlignment="Center" Margin="4,0" />
+                    <TextBox x:Name="SyncMinutesBox" Width="60" HorizontalAlignment="Left" />
+                </DockPanel>
+                <CheckBox x:Name="KeepOpenBox" Content="Keep the console window open after Run (cmd /k)" Margin="110,4,0,0" />
+                <TextBlock x:Name="ServerText" Foreground="Gray" Margin="0,6,0,0" />
+            </StackPanel>
+        </GroupBox>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Save" IsDefault="True" Style="{StaticResource PrimaryButton}" Click="Save_Click" />
+            <Button Content="Close" IsCancel="True" />
+        </StackPanel>
+        <TextBlock x:Name="StatusText" TextWrapping="Wrap" Margin="0,6,0,0" />
+    </StackPanel>
+</Window>

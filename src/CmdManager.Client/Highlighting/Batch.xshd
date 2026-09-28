@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<SyntaxDefinition name="Batch" extensions=".cmd;.bat" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Comment" foreground="#008000" />
+  <Color name="Keyword" foreground="#0000FF" fontWeight="bold" />
+  <Color name="Variable" foreground="#C05800" />
+  <Color name="Label" foreground="#8B008B" fontWeight="bold" />
+  <Color name="String" foreground="#A31515" />
+  <Color name="Operator" foreground="#606060" />
+
+  <RuleSet ignoreCase="true">
+    <Span color="Comment">
+      <Begin>^\s*@?(rem(\s|$)|::)</Begin>
+    </Span>
+    <Rule color="Label">^\s*:[A-Za-z0-9_.\-]+</Rule>
+    <Span color="String">
+      <Begin>"</Begin>
+      <End>"|$</End>
+      <RuleSet>
+        <Rule color="Variable">%~?[a-z]*[0-9*]|%[A-Za-z0-9_#$@\-]+(:[^%]*)?%|![A-Za-z0-9_]+!|%%~?[a-z]*[A-Za-z]</Rule>
+      </RuleSet>
+    </Span>
+    <Rule color="Variable">%~?[a-z]*[0-9*]|%[A-Za-z0-9_#$@\-]+(:[^%]*)?%|![A-Za-z0-9_]+!|%%~?[a-z]*[A-Za-z]</Rule>
+    <Rule color="Operator">[&amp;|&lt;&gt;()@]</Rule>
+    <Keywords color="Keyword">
+      <Word>echo</Word><Word>off</Word><Word>on</Word><Word>set</Word><Word>setlocal</Word><Word>endlocal</Word>
+      <Word>if</Word><Word>else</Word><Word>not</Word><Word>exist</Word><Word>defined</Word><Word>errorlevel</Word>
+      <Word>equ</Word><Word>neq</Word><Word>lss</Word><Word>leq</Word><Word>gtr</Word><Word>geq</Word>
+      <Word>for</Word><Word>in</Word><Word>do</Word><Word>goto</Word><Word>call</Word><Word>exit</Word><Word>shift</Word>
+      <Word>start</Word><Word>pushd</Word><Word>popd</Word><Word>cd</Word><Word>chdir</Word><Word>pause</Word><Word>title</Word>
+      <Word>cls</Word><Word>del</Word><Word>erase</Word><Word>copy</Word><Word>move</Word><Word>ren</Word><Word>mkdir</Word>
+      <Word>md</Word><Word>rd</Word><Word>rmdir</Word><Word>type</Word><Word>nul</Word><Word>color</Word><Word>prompt</Word>
+      <Word>enabledelayedexpansion</Word><Word>enableextensions</Word>
+    </Keywords>
+  </RuleSet>
+</SyntaxDefinition>

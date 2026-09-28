@@ -1,0 +1,106 @@
+<Window x:Class="CmdManager.Client.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
+        Title="CmdManager" Width="1100" Height="700" MinWidth="760" MinHeight="420"
+        WindowStartupLocation="CenterScreen">
+    <Window.InputBindings>
+        <KeyBinding Key="N" Modifiers="Control" Command="ApplicationCommands.New" />
+        <KeyBinding Key="F5" Command="NavigationCommands.Refresh" />
+    </Window.InputBindings>
+    <Window.CommandBindings>
+        <CommandBinding Command="ApplicationCommands.New" Executed="New_Executed" />
+        <CommandBinding Command="NavigationCommands.Refresh" Executed="Refresh_Executed" />
+    </Window.CommandBindings>
+
+    <DockPanel>
+        <!-- toolbar -->
+        <Border DockPanel.Dock="Top" Background="#FFF3F5F8" BorderBrush="#FFDDE1E6" BorderThickness="0,0,0,1" Padding="6,4">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Button Content="New..." Click="New_Click" ToolTip="Create a command from a template (Ctrl+N)" />
+                    <Button Content="Edit" Click="Edit_Click" />
+                    <Button Content="Rename..." Click="Rename_Click" />
+                    <Button Content="Delete" Click="Delete_Click" />
+                    <Button Content="Run..." Click="Run_Click" />
+                    <Separator Margin="6,2" />
+                    <Button Content="Sync now" Click="SyncNow_Click" ToolTip="Mirror the library from the server into the command folder (F5)" />
+                    <Button x:Name="PushButton" Content="Sync local changes to DB" Style="{StaticResource PrimaryButton}" Click="Push_Click"
+                            ToolTip="Upload files you added or edited in the command folder (e.g. in Notepad) and delete files you deleted there" />
+                    <Separator Margin="6,2" />
+                    <Button Content="Import folder..." Click="Import_Click" />
+                    <Button Content="Open folder" Click="OpenFolder_Click" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                    <TextBlock x:Name="UserText" VerticalAlignment="Center" Margin="6,0" Foreground="Gray" />
+                    <Button Content="Settings" Click="Settings_Click" />
+                    <Button Content="Log out" Click="Logout_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- status bar -->
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <TextBlock x:Name="FolderStatus" />
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <TextBlock x:Name="CsxStatus" />
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <TextBlock x:Name="PendingStatus" FontWeight="SemiBold" Foreground="#FFB45309" />
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <TextBlock x:Name="SyncStatus" Foreground="Gray" />
+            </StatusBarItem>
+        </StatusBar>
+
+        <Grid Margin="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" MinWidth="300" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="4*" MinWidth="240" />
+            </Grid.ColumnDefinitions>
+
+            <DockPanel Grid.Column="0">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <TextBlock Text="Search:" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <ComboBox x:Name="TypeFilter" DockPanel.Dock="Right" Width="110" SelectedIndex="0" SelectionChanged="Filter_Changed">
+                        <ComboBoxItem Content="Everything" />
+                        <ComboBoxItem Content="Commands" />
+                        <ComboBoxItem Content="Assets" />
+                    </ComboBox>
+                    <TextBox x:Name="SearchBox" TextChanged="Search_TextChanged" />
+                </DockPanel>
+                <ListView x:Name="ItemsList" SelectionMode="Single" SelectionChanged="ItemsList_SelectionChanged"
+                          MouseDoubleClick="ItemsList_MouseDoubleClick" KeyDown="ItemsList_KeyDown">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Path" Width="230" DisplayMemberBinding="{Binding RelativePath}" />
+                            <GridViewColumn Header="Kind" Width="90" DisplayMemberBinding="{Binding KindText}" />
+                            <GridViewColumn Header="Size" Width="70" DisplayMemberBinding="{Binding SizeText}" />
+                            <GridViewColumn Header="Updated" Width="120" DisplayMemberBinding="{Binding UpdatedText}" />
+                            <GridViewColumn Header="Description" Width="200" DisplayMemberBinding="{Binding Description}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch" />
+
+            <DockPanel Grid.Column="2">
+                <StackPanel DockPanel.Dock="Top" Margin="4,0,0,4">
+                    <TextBlock x:Name="PreviewTitle" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="PreviewInfo" Foreground="Gray" TextWrapping="Wrap" />
+                </StackPanel>
+                <Border BorderBrush="#FFDDE1E6" BorderThickness="1">
+                    <avalonEdit:TextEditor x:Name="Preview" IsReadOnly="True" ShowLineNumbers="True"
+                                           FontFamily="Cascadia Mono, Consolas, Courier New" FontSize="13"
+                                           HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" />
+                </Border>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

@@ -1,0 +1,48 @@
+<Window x:Class="CmdManager.Client.Views.EditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
+        Title="Editor" Width="900" Height="640" WindowStartupLocation="CenterOwner">
+    <Window.InputBindings>
+        <KeyBinding Key="S" Modifiers="Control" Command="ApplicationCommands.Save" />
+        <KeyBinding Key="F5" Command="NavigationCommands.Refresh" />
+    </Window.InputBindings>
+    <Window.CommandBindings>
+        <CommandBinding Command="ApplicationCommands.Save" Executed="Save_Executed" />
+        <CommandBinding Command="NavigationCommands.Refresh" Executed="Run_Executed" />
+    </Window.CommandBindings>
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#FFF3F5F8" BorderBrush="#FFDDE1E6" BorderThickness="0,0,0,1" Padding="6,4">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Button x:Name="SaveButton" Content="Save (Ctrl+S)" Style="{StaticResource PrimaryButton}" Click="Save_Click" />
+                    <Button Content="Open in external editor" Click="External_Click" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <TextBlock Text="Args:" VerticalAlignment="Center" Margin="8,0,4,0" />
+                    <TextBox x:Name="ArgsBox" Width="220" ToolTip="Arguments passed when you press Run" />
+                    <Button Content="Run (F5)" Click="Run_Click" />
+                </StackPanel>
+                <Grid />
+            </DockPanel>
+        </Border>
+        <Border DockPanel.Dock="Top" Padding="8,4">
+            <DockPanel>
+                <TextBlock Text="Description:" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <TextBox x:Name="TagsBox" DockPanel.Dock="Right" Width="200" ToolTip="Tags, comma separated" />
+                <TextBlock Text="Tags:" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="8,0,4,0" />
+                <TextBox x:Name="DescriptionBox" />
+            </DockPanel>
+        </Border>
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" />
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <TextBlock x:Name="CaretText" Foreground="Gray" />
+            </StatusBarItem>
+        </StatusBar>
+        <avalonEdit:TextEditor x:Name="Editor" ShowLineNumbers="True" FontFamily="Cascadia Mono, Consolas, Courier New" FontSize="13"
+                               HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" WordWrap="False" />
+    </DockPanel>
+</Window>

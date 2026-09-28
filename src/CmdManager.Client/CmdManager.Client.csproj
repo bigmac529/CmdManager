@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- Lets the WPF project build (not run) on Linux/macOS, e.g. in CI or the dev box. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>CmdManager.Client</RootNamespace>
+    <AssemblyName>CmdManager</AssemblyName>
+    <Product>CmdManager</Product>
+    <AssemblyTitle>CmdManager</AssemblyTitle>
+
+    <!-- ClickOnce version: 1.0.<CmdManagerBuildNumber>.0 (pass /p:CmdManagerBuildNumber=N when publishing). -->
+    <CmdManagerBuildNumber Condition="'$(CmdManagerBuildNumber)' == ''">0</CmdManagerBuildNumber>
+    <CmdManagerApplicationVersion>1.0.$(CmdManagerBuildNumber).0</CmdManagerApplicationVersion>
+    <Version>1.0.$(CmdManagerBuildNumber)</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CmdManager.Core\CmdManager.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Highlighting\Batch.xshd" />
+  </ItemGroup>
+
+</Project>
