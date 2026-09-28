@@ -105,7 +105,7 @@ Steps:
 
 **Restoring a backup:** take the API offline by putting `app_offline.htm` in the api folder. Then run `robocopy <backup> C:\WebApps\CmdManager\api /MIR /XF app_offline.htm /XD logs` and delete `app_offline.htm`.
 
-> **The job stays queued until a runner exists.** Register a **repo-scoped** runner for `bigmac529/CmdManager` with the extra label **`cmdmanager`** (Settings → Actions → Runners → New self-hosted runner → Windows). Run it as a service under a **non-admin** local account. That account needs modify rights on `C:\WebApps\CmdManager\api` and the backup root, and nothing else. `actions/setup-dotnet` installs the .NET 10 SDK into the runner's tool cache. The scripts run in Windows PowerShell 5.1 (`shell: powershell`), so PowerShell 7 is not required.
+> **The job stays queued until a runner exists.** Register a **repo-scoped** runner for `bigmac529/CmdManager` with the extra label **`cmdmanager`** (Settings → Actions → Runners → New self-hosted runner → Windows). Run it as a service under a **non-admin** local account. That account needs modify rights on `C:\WebApps\CmdManager\api` and the backup root, plus the site root `C:\WebApps\CmdManager` for the client publish (below), and nothing else. `actions/setup-dotnet` installs the .NET 10 SDK into the runner's tool cache. The scripts run in Windows PowerShell 5.1 (`shell: powershell`), so PowerShell 7 is not required.
 
 ## Adding a migration
 
@@ -127,27 +127,34 @@ The design-time factory uses the connection string from `ConnectionStrings__CmdM
 
 ### Publishing (ClickOnce)
 
-On Windows with Visual Studio 2026 / MSBuild (`dotnet publish` cannot produce ClickOnce):
+**Install:** <https://cmdmanager.socha3.com/> (landing page with an *Install* button that opens `CmdManager.application`; `setup.exe` is the fallback for browsers without ClickOnce support).
+
+`.github/workflows/publish-client.yml` publishes on every push to `main` that touches `src/CmdManager.Client/**`, `src/CmdManager.Core/**`, `deploy/clickonce/**` or the workflow, and on manual *Run workflow*. Pull requests run the build job only.
+
+1. **build** (GitHub-hosted `windows-latest`, Visual Studio 2026 MSBuild; `dotnet publish` cannot produce ClickOnce): `msbuild /restore /t:Publish /p:PublishProfile=ClickOnceProfile /p:CmdManagerBuildNumber=<run number>`, then renders `deploy/clickonce/index.html` (version, date, size) into the output and uploads it as the `clickonce-site` artifact.
+2. **deploy** (self-hosted runner, environment `production`, `main` only). The site root is the parent of `DEPLOY_PATH`, i.e. `C:\WebApps\CmdManager`. The job:
+   - backs up the root **without `api`** to `<DEPLOY_BACKUP_ROOT>\site-root\<yyyyMMdd-HHmmss>` and keeps the newest 5;
+   - copies the new `Application Files\CmdManager_1_0_<N>_0` folder in, then the top-level files, and `CmdManager.application` last (that file switches clients to the new version);
+   - mirrors (`/MIR`) **only** `Application Files`, which holds nothing but ClickOnce output, to drop old versions. It then deletes top-level files that an earlier publish deployed and this one no longer ships (tracked in `<DEPLOY_BACKUP_ROOT>\site-root\deployed-root-files.txt`). There is no `/MIR` on the root, so `api\`, the root `web.config` and anything else owned by the server are never touched;
+   - checks `/`, `CmdManager.application`, the application manifest, `.deploy` files, `setup.exe` and `/api/health` over the public URL.
+
+The runner account needs Modify on the site root (in addition to `api` and the backup root).
+
+By hand (Windows, VS 2026 MSBuild):
 
 ```cmd
 msbuild src\CmdManager.Client\CmdManager.Client.csproj /restore /t:Publish /p:PublishProfile=ClickOnceProfile /p:CmdManagerBuildNumber=<N>
 ```
 
-Then upload `src\CmdManager.Client\bin\publish\clickonce\` to the **site root** `C:\WebApps\CmdManager`. The install, publish and update URL is `https://cmdmanager.socha3.com/`.
+> **Never delete the `api` folder when uploading ClickOnce files by hand.** Copy with `robocopy src\CmdManager.Client\bin\publish\clickonce C:\WebApps\CmdManager /E /XD api /XF web.config`, and never `/MIR` the root.
 
-> **Never delete the `api` folder when uploading ClickOnce files.** The API application lives in `C:\WebApps\CmdManager\api`, inside the root. Copy with the folder excluded, and never use `/MIR` (or "delete files not in source") on the root without `/XD api`. Also leave the root `web.config` in place:
-> ```cmd
-> robocopy src\CmdManager.Client\bin\publish\clickonce C:\WebApps\CmdManager /E /XD api /XF web.config
-> ```
+The profile:
 
-The profile mirrors SochaDiff:
-
-- Framework-dependent win-x64, with the .NET 10 Desktop Runtime bootstrapper.
-- Checks for updates before startup, and every version is required.
-- Version is `1.0.<N>.0`.
-- `PublishUrl`/`InstallUrl`/`UpdateUrl` = `https://cmdmanager.socha3.com/`.
-- Manifests are unsigned. Pass `/p:SignManifests=true /p:ManifestCertificateThumbprint=...` and always use the same certificate.
-- The root static site needs MIME types for `.application` (`application/x-ms-application`), `.manifest` (`application/x-ms-manifest`) and `.deploy` (`application/octet-stream`). Recent IIS versions include the first two.
+- **Self-contained win-x64:** the .NET 10 Desktop Runtime is bundled, so nothing needs to be installed first. The first install is about 175 MB. Updates only download files whose hash changed. `/p:CmdManagerSelfContained=false` builds framework-dependent instead, with the Desktop Runtime as a `setup.exe` prerequisite.
+- Checks `https://cmdmanager.socha3.com/` for updates before startup, and every version is required.
+- Version is `1.0.<N>.0`, where N is the workflow run number.
+- Manifests are **unsigned**, so Windows shows "Unknown publisher". To sign, pass `/p:SignManifests=true /p:ManifestCertificateThumbprint=...` and always use the same certificate.
+- IIS serves `.application` (`application/x-ms-application`), `.manifest` (`application/x-ms-manifest`) and `.deploy` (`application/octet-stream`) with its built-in MIME map.
 
 ### First run
 

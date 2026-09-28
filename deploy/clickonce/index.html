@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Landing page for the CmdManager ClickOnce install. Rendered by .github/workflows/publish-client.yml:
+     __VERSION__ / __PUBLISHED__ / __SIZE_MB__ / __COMMIT__ are replaced at publish time. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache">
+  <title>CmdManager __VERSION__</title>
+  <style>
+    body { font-family: system-ui, "Segoe UI", sans-serif; margin: 0; background: #f5f6f8; color: #1f2328; }
+    main { max-width: 640px; margin: 12vh auto 0; padding: 2rem 2.5rem; background: #fff; border-radius: 10px;
+           box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    h1 { margin: 0 0 .25rem; }
+    .version { color: #59636e; margin: 0 0 1.5rem; }
+    .install { display: inline-block; padding: .8rem 1.6rem; background: #0b63c5; color: #fff; border-radius: 6px;
+               font-size: 1.1rem; font-weight: 600; text-decoration: none; }
+    .install:hover { background: #0a55a8; }
+    ul { padding-left: 1.2rem; line-height: 1.5; }
+    small, .muted { color: #59636e; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>CmdManager</h1>
+  <p class="version">Version <strong id="version">__VERSION__</strong> &middot; published __PUBLISHED__</p>
+  <p>Your library of command-line scripts, synced to every Windows PC you use and put on your <code>PATH</code>.</p>
+  <p><a class="install" href="CmdManager.application">Install CmdManager</a></p>
+  <ul>
+    <li>Requires Windows 10 or 11 (x64). The .NET 10 Desktop Runtime is included (self-contained), so nothing else
+        needs to be installed. The first install downloads about __SIZE_MB__ MB; updates only download changed files.</li>
+    <li>Microsoft Edge opens the installer directly. In other browsers, open the downloaded
+        <code>CmdManager.application</code> file, or use <a href="setup.exe">setup.exe</a> instead.</li>
+    <li>CmdManager checks <code>https://cmdmanager.socha3.com/</code> for updates each time it starts and installs
+        them automatically.</li>
+    <li>The installer is not code-signed yet, so Windows shows "Unknown publisher". Choose <em>Install</em> (or
+        <em>More info &rarr; Run anyway</em> for SmartScreen).</li>
+  </ul>
+  <p><small>Build __COMMIT__ &middot; <a href="https://github.com/bigmac529/CmdManager">source</a></small></p>
+</main>
+</body>
+</html>
